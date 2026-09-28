@@ -108,7 +108,7 @@ namespace ViewConeExplore
             _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1500f,
                 new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
             // Silhouettes against the sky stay visible through much more fog than terrain details.
-            _horizonFogMultiplier = Config.Bind("Horizon", "FogMultiplier", 3f,
+            _horizonFogMultiplier = Config.Bind("Horizon", "FogMultiplier", 3.5f,
                 new ConfigDescription("Scales the fog-derived distance for coasts and peaks.", new AcceptableValueRange<float>(0.1f, 10f)));
             _horizonMinAngle = Config.Bind("Horizon", "MinAngle", 0.25f,
                 new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.25 means about 4.4 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
