@@ -22,8 +22,9 @@ namespace ViewConeExplore
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<float> _maxDistance;
         private ConfigEntry<float> _minDistance;
-        private ConfigEntry<float> _heightBonusPerMeter;
-        private ConfigEntry<float> _heightBonusMax;
+        private ConfigEntry<float> _heightBonusMaxFactor;
+        private ConfigEntry<float> _snowVisibility;
+        private const float StandingEyeHeight = 1.8f;
         private ConfigEntry<bool> _useFog;
         private ConfigEntry<float> _fogMultiplier;
         private ConfigEntry<float> _nightMultiplier;
@@ -83,14 +84,15 @@ namespace ViewConeExplore
             _enabled = Config.Bind("General", "Enabled", true, "Enable view-cone map exploration.");
             _maxDistance = Config.Bind("Distance", "MaxDistance", 0f,
                 new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance setting (224 m on Low up to 544 m on Extreme).", new AcceptableValueRange<float>(0f, 2000f)));
-            _heightBonusEnabled = Config.Bind("Distance", "HeightBonusEnabled", false,
-                "Height bonus: the higher your eye above the sea, the farther you can see. From hills and mountains this can reveal a lot at once, so it is off by default and switched in game with HeightBonusToggleKey.");
+            _heightBonusEnabled = Config.Bind("Distance", "HeightBonusEnabled", true,
+                "Height bonus: ground you look down on from above stays recognizable farther away. Its reach grows with the square root of how far your eye is above it, e.g. 3x the draw distance 16 m above, 7x 90 m above. Fog still limits it. Can be switched in game with HeightBonusToggleKey.");
             _heightBonusToggleKey = Config.Bind("Distance", "HeightBonusToggleKey", new KeyboardShortcut(KeyCode.F7),
                 "Switches the height bonus. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
-            _heightBonusPerMeter = Config.Bind("Distance", "HeightBonusPerMeter", 2f,
-                new ConfigDescription("Percent added to the maximum view distances (normal and horizon) per meter your eye is above the sea. Fog still limits the view. 0 = no height bonus.", new AcceptableValueRange<float>(0f, 10f)));
-            _heightBonusMax = Config.Bind("Distance", "HeightBonusMax", 200f,
-                new ConfigDescription("Largest height bonus in percent.", new AcceptableValueRange<float>(0f, 500f)));
+            _heightBonusMaxFactor = Config.Bind("Distance", "HeightBonusMaxFactor", 8f,
+                new ConfigDescription("The height bonus reaches at most this many times the draw distance.", new AcceptableValueRange<float>(1f, 20f)));
+            // Measured: from a 100 m peak in snowfall, outlines faded at ~850 m, about half of what the fog density predicts.
+            _snowVisibility = Config.Bind("Distance", "SnowVisibility", 0.55f,
+                new ConfigDescription("Scales all fog-based distances while it is snowing. Falling snow hides much more than the fog density suggests.", new AcceptableValueRange<float>(0.1f, 1f)));
             _minDistance = Config.Bind("Distance", "MinDistance", 80f,
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
@@ -278,23 +280,27 @@ namespace ViewConeExplore
             public float BaseYaw, FovRad, Range, FarRange, Step, FarStep, WaterLevel;
             public int RayCount, NextRay, TextureSize, Half;
             public float PixelSize;
-            public bool LineOfSight, Forest, Horizon, Changed, FarPass;
+            public bool LineOfSight, Forest, Far, Changed, FarPass;
             public float ForestSight, Canopy, RiseBase, MinRiseSlope;
+            public float DrawDistance, HeightRange, HeightMaxFactor, HorizonRange;
         }
 
         private Sweep StartSweep(Minimap map, Player player, Camera cam)
         {
             Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
             float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
-            float heightBonus = GetHeightBonus(eye.y, waterLevel);
-
-            float range = GetViewDistance(GetMaxDistance() * heightBonus, _minDistance.Value, _fogMultiplier.Value);
+            float drawDistance = GetMaxDistance();
+            float range = GetViewDistance(drawDistance, _minDistance.Value, _fogMultiplier.Value);
+            // Height bonus: from above, ground further away can still be made out (see HeightReach).
+            float heightRange = _heightBonusEnabled.Value
+                ? GetViewDistance(HeightReach(drawDistance, eye.y - waterLevel, _heightBonusMaxFactor.Value), 0f, _fogMultiplier.Value)
+                : 0f;
             // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
             bool coastal = IsNearOcean(player.transform.position);
             float horizonRange = _horizonEnabled.Value && (coastal || _horizonInlandMinAngle.Value > 0f)
-                ? GetViewDistance(_horizonMaxDistance.Value * heightBonus, 0f, _horizonFogMultiplier.Value)
+                ? GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value)
                 : 0f;
-            float farRange = Mathf.Max(range, horizonRange);
+            float farRange = Mathf.Max(range, Mathf.Max(horizonRange, heightRange));
             if (farRange <= 0f)
                 return null;
 
@@ -337,7 +343,11 @@ namespace ViewConeExplore
                 PixelSize = pixelSize,
                 LineOfSight = _lineOfSight.Value,
                 Forest = _forestEnabled.Value && _forestDensityMultiplier.Value > 0f,
-                Horizon = horizonRange > range,
+                Far = farRange > range,
+                DrawDistance = drawDistance,
+                HeightRange = heightRange,
+                HeightMaxFactor = _heightBonusMaxFactor.Value,
+                HorizonRange = horizonRange,
                 ForestSight = _forestSightDistance.Value,
                 Canopy = _canopyHeight.Value,
                 // At sea, land has to rise above the sea. Inland it has to rise above the eye, against the sky.
@@ -380,13 +390,13 @@ namespace ViewConeExplore
                 bool far = d > s.Range;
                 bool atProbe = probe && d >= probeDist;
 
-                if (s.LineOfSight || s.Forest || s.Horizon)
+                if (s.LineOfSight || s.Forest || s.Far)
                 {
                     Cell cell = GetCell(x, z, s.Step, s.WaterLevel);
                     float slope = (cell.Ground - eye.y) / d;
 
                     bool terrainHidden = false;
-                    if (s.LineOfSight || s.Horizon)
+                    if (s.LineOfSight || s.Far)
                     {
                         // Distant coasts and peaks are only seen where nothing closer blocks them.
                         if (s.LineOfSight || far)
@@ -398,8 +408,13 @@ namespace ViewConeExplore
                         }
                     }
 
-                    // Too flat or too far away to stand out: water, low shores, distant lowlands.
-                    bool tooFlat = far && cell.Height - s.RiseBase < d * s.MinRiseSlope;
+                    // Beyond the normal range, a point is only seen when you look down on it steeply enough
+                    // (height bonus) or when it stands out against the sky (horizon mode).
+                    float heightReach = s.HeightRange > 0f
+                        ? Mathf.Min(HeightReach(s.DrawDistance, eye.y - cell.Ground, s.HeightMaxFactor), s.HeightRange)
+                        : 0f;
+                    bool tooFar = far && d > heightReach
+                                  && (d > s.HorizonRange || cell.Height - s.RiseBase < d * s.MinRiseSlope);
 
                     bool forestHidden = false;
                     if (s.Forest)
@@ -419,14 +434,14 @@ namespace ViewConeExplore
                     {
                         if (terrainHidden)
                             return $"hidden by terrain {maxSlopeDist:0} m away ({Mathf.Atan(maxSlope) * Mathf.Rad2Deg:0.0} deg, target {Mathf.Atan(slope) * Mathf.Rad2Deg:0.0} deg)";
-                        if (tooFlat)
-                            return $"too flat for horizon mode (needs {Mathf.Atan(s.MinRiseSlope) * Mathf.Rad2Deg:0.00} deg, has {Mathf.Atan2(cell.Height - s.RiseBase, d) * Mathf.Rad2Deg:0.00} deg)";
+                        if (tooFar)
+                            return $"too far (height reach {heightReach:0} m; horizon {s.HorizonRange:0} m, needs {Mathf.Atan(s.MinRiseSlope) * Mathf.Rad2Deg:0.00} deg, has {Mathf.Atan2(cell.Height - s.RiseBase, d) * Mathf.Rad2Deg:0.00} deg)";
                         if (forestHidden)
                             return "hidden by forest";
-                        return far ? "visible (horizon mode)" : "visible";
+                        return !far ? "visible" : d <= heightReach ? "visible (height bonus)" : "visible (horizon mode)";
                     }
 
-                    if (terrainHidden || tooFlat || forestHidden)
+                    if (terrainHidden || tooFar || forestHidden)
                         continue;
                 }
                 else if (atProbe)
@@ -612,10 +627,12 @@ namespace ViewConeExplore
             float fogRange = GetFogRange();
             float daylight = GetDaylight();
             float nightFactor = Mathf.Lerp(_nightMultiplier.Value, 1f, daylight);
-            float heightBonus = GetHeightBonus(eye.y, waterLevel);
-            float range = GetViewDistance(GetMaxDistance() * heightBonus, _minDistance.Value, _fogMultiplier.Value);
+            float range = GetViewDistance(GetMaxDistance(), _minDistance.Value, _fogMultiplier.Value);
+            float heightRange = _heightBonusEnabled.Value
+                ? GetViewDistance(HeightReach(GetMaxDistance(), eye.y - waterLevel, _heightBonusMaxFactor.Value), 0f, _fogMultiplier.Value)
+                : 0f;
             bool nearOcean = IsNearOcean(player.transform.position);
-            float horizonRange = GetViewDistance(_horizonMaxDistance.Value * heightBonus, 0f, _horizonFogMultiplier.Value);
+            float horizonRange = GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value);
             string env = EnvMan.instance?.GetCurrentEnvironment()?.m_name ?? "?";
             Vector3 pos = player.transform.position;
 
@@ -663,21 +680,22 @@ namespace ViewConeExplore
                 ? $"fog={RenderSettings.fogMode} density={RenderSettings.fogDensity:0.00000} fogRange={fogRange:0}"
                 : "fog=off";
             Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
-                           $"viewRange={range:0} maxDistance={GetMaxDistance():0} heightBonus={heightBonus:0.00} coastal={nearOcean} horizonRange={horizonRange:0} " +
+                           $"viewRange={range:0} maxDistance={GetMaxDistance():0} heightRange={heightRange:0} snowing={IsSnowing()} coastal={nearOcean} horizonRange={horizonRange:0} " +
                            $"eyeHeight={eye.y - waterLevel:0.0} cameraAboveEye={origin.y - eye.y:0.0} pos=({pos.x:0},{pos.z:0})");
             player.Message(MessageHud.MessageType.TopLeft,
-                $"{summary}\nView {range:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
+                $"{summary}\nView {range:0} m, height {heightRange:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
         }
 
         /// <summary>
-        /// Multiplier for the maximum distances: the higher your eye above the sea, the farther you can see.
+        /// How far ground can still be made out when the eye is <paramref name="drop"/> meters above it.
+        /// A patch of ground seen from height h at distance d appears about h / d² deep, so the distance at
+        /// which it stays readable grows with √h. Standing on flat ground (eye 1.8 m up) gives the draw distance.
         /// </summary>
-        private float GetHeightBonus(float eyeY, float waterLevel)
+        private static float HeightReach(float drawDistance, float drop, float maxFactor)
         {
-            if (!_heightBonusEnabled.Value)
-                return 1f;
-            float height = Mathf.Max(0f, eyeY - waterLevel);
-            return 1f + Mathf.Min(height * _heightBonusPerMeter.Value, _heightBonusMax.Value) / 100f;
+            if (drop <= StandingEyeHeight)
+                return drawDistance;
+            return drawDistance * Mathf.Min(Mathf.Sqrt(drop / StandingEyeHeight), maxFactor);
         }
 
         /// <summary>
@@ -697,22 +715,34 @@ namespace ViewConeExplore
         /// <summary>
         /// Distance at which the fog swallows terrain completely, before FogMultiplier. Infinity without fog.
         /// </summary>
-        private static float GetFogRange()
+        private float GetFogRange()
         {
             if (!RenderSettings.fog)
                 return float.PositiveInfinity;
 
             float density = RenderSettings.fogDensity;
+            float range;
             switch (RenderSettings.fogMode)
             {
                 case FogMode.Linear:
-                    return RenderSettings.fogEndDistance;
+                    range = RenderSettings.fogEndDistance;
+                    break;
                 case FogMode.Exponential:
                     // Visibility ends where fog transmittance drops below ~5% (ln 20 ≈ 3).
-                    return density > 0f ? 3f / density : float.PositiveInfinity;
+                    range = density > 0f ? 3f / density : float.PositiveInfinity;
+                    break;
                 default:
-                    return density > 0f ? 1.732f / density : float.PositiveInfinity;
+                    range = density > 0f ? 1.732f / density : float.PositiveInfinity;
+                    break;
             }
+            return IsSnowing() ? range * _snowVisibility.Value : range;
+        }
+
+        /// <summary>Snowfall hides much more than the fog density of snowy weather suggests.</summary>
+        private static bool IsSnowing()
+        {
+            string env = EnvMan.instance?.GetCurrentEnvironment()?.m_name;
+            return env != null && env.IndexOf("snow", StringComparison.OrdinalIgnoreCase) >= 0;
         }
 
         /// <summary>1 during the day, 0 at night, blended smoothly around dawn and dusk.</summary>

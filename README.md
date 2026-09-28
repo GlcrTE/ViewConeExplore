@@ -9,7 +9,7 @@ A Valheim BepInEx mod that reveals the minimap only where you look. Vanilla unco
 - **Line of sight:** Hills and mountains hide what's behind them, while distant peaks stay visible.
 - **Forests block your view:** Dense forest limits sight at ground level, but you can look over it from above. No physics, so it works at any distance.
 - **Horizon mode:** Distant coastlines and peaks that you can just barely see are revealed far beyond the normal view distance. At sea and on the coast even low shores count; inland only tall peaks rising above you against the sky. Water and flat land stay hidden, and taller land shows up from farther away.
-- **Height bonus (optional, F7):** The higher you stand above the sea, on a hill, a cliff or a mast, the farther you can see. Fog still limits the view. Off by default; turning it on needs a second press within 3 seconds.
+- **Height bonus:** Ground you look down on from a hill, a cliff or a mast stays recognizable farther away. The reach grows with the square root of how far your eye is above that ground: about 3x the draw distance from 16 m above, 7x from 90 m above. Fog and snowfall still limit it. Switch it with F7 (turning it on needs a second press within 3 seconds).
 - **Gap filling:** Small unexplored spots near you are filled in automatically, so the map doesn't turn into a patchwork.
 - **Near radius:** Your immediate surroundings stay revealed all around you.
 - **Fully configurable and lightweight:** Client-side only, no Harmony patches, cached terrain data.
@@ -28,10 +28,10 @@ The mod is client-side only and does not need to be installed on the server.
 |---|---|---|---|
 | General | `Enabled` | `true` | Enable view-cone map exploration |
 | Distance | `MaxDistance` | `0` | Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance (Low 224 m, Medium/Classic 288 m, High 352 m, Very High 416 m, Ultra 480 m, Extreme 544 m) |
-| Distance | `HeightBonusEnabled` | `false` | Height bonus on or off (switch in game with `HeightBonusToggleKey`) |
+| Distance | `HeightBonusEnabled` | `true` | Height bonus on or off (switch in game with `HeightBonusToggleKey`) |
 | Distance | `HeightBonusToggleKey` | `F7` | Switches the height bonus; turning it on needs a second press within 3 seconds |
-| Distance | `HeightBonusPerMeter` | `2` | Percent added to the maximum view distances per meter your eye is above the sea (0 = off) |
-| Distance | `HeightBonusMax` | `200` | Largest height bonus in percent |
+| Distance | `HeightBonusMaxFactor` | `8` | The height bonus reaches at most this many times the draw distance |
+| Distance | `SnowVisibility` | `0.55` | Scales all fog-based distances while it is snowing |
 | Distance | `MinDistance` | `80` | The reveal distance never drops below this |
 | Distance | `UseFogVisibility` | `true` | Derive the view distance from the current fog density |
 | Distance | `FogMultiplier` | `2.2` | Scales the fog-derived view distance |
