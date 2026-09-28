@@ -87,9 +87,9 @@ namespace ViewConeExplore
                 "Height bonus: the higher your eye above the sea, the farther you can see. From hills and mountains this can reveal a lot at once, so it is off by default and switched in game with HeightBonusToggleKey.");
             _heightBonusToggleKey = Config.Bind("Distance", "HeightBonusToggleKey", new KeyboardShortcut(KeyCode.F7),
                 "Switches the height bonus. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
-            _heightBonusPerMeter = Config.Bind("Distance", "HeightBonusPerMeter", 1f,
+            _heightBonusPerMeter = Config.Bind("Distance", "HeightBonusPerMeter", 2f,
                 new ConfigDescription("Percent added to the maximum view distances (normal and horizon) per meter your eye is above the sea. Fog still limits the view. 0 = no height bonus.", new AcceptableValueRange<float>(0f, 10f)));
-            _heightBonusMax = Config.Bind("Distance", "HeightBonusMax", 100f,
+            _heightBonusMax = Config.Bind("Distance", "HeightBonusMax", 200f,
                 new ConfigDescription("Largest height bonus in percent.", new AcceptableValueRange<float>(0f, 500f)));
             _minDistance = Config.Bind("Distance", "MinDistance", 80f,
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));

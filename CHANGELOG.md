@@ -3,7 +3,7 @@
 ## 1.2.0
 
 ### Added
-- **Height bonus:** The higher your eye is above the sea, the farther you can see. By default each meter adds 1% to the maximum view distance and the horizon range, up to +100% (`[Distance] HeightBonusPerMeter`, `HeightBonusMax`). On Extreme (544 m), that is about 555 m on deck, 625 m 15 m up, and 870 m on a 60 m hill. Fog still limits the view, so height only helps in clear weather.
+- **Height bonus:** The higher your eye is above the sea, the farther you can see. By default each meter adds 2% to the maximum view distance and the horizon range, up to +200% (`[Distance] HeightBonusPerMeter`, `HeightBonusMax`). With a 288 m draw distance, that is about 300 m on deck, 375 m 15 m up, 635 m on a 60 m hill and 850 m on a 100 m peak, which matches what was still visible in game. Fog still limits the view, so height only helps in clear weather.
   - From hills and mountains this can reveal a lot at once, so the height bonus is off by default and switched in game with **F7**. Turning it on needs a second press within 3 seconds to confirm; turning it off is instant. The state is saved in the config (`HeightBonusEnabled`, `HeightBonusToggleKey`).
 - The calibration key now also shows whether the target is explored on the map and, if the mod considers it hidden, why (terrain, forest, too flat, out of range).
 
