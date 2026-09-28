@@ -40,6 +40,7 @@ namespace ViewConeExplore
         private ConfigEntry<float> _horizonMaxDistance;
         private ConfigEntry<float> _horizonFogMultiplier;
         private ConfigEntry<float> _horizonMinAngle;
+        private ConfigEntry<float> _horizonInlandMinAngle;
         private ConfigEntry<float> _horizonCoastDistance;
         private ConfigEntry<KeyboardShortcut> _calibrationKey;
 
@@ -75,8 +76,8 @@ namespace ViewConeExplore
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
                 "Derive the view distance from the current fog density (rain, mist, storms shorten it).");
-            // 1.8 roughly matches where silhouettes (coasts, rocks) still show through the fog.
-            _fogMultiplier = Config.Bind("Distance", "FogMultiplier", 1.8f,
+            // 2.2 matches where land with trees is just barely visible through the fog (measured in DeepForest Mist).
+            _fogMultiplier = Config.Bind("Distance", "FogMultiplier", 2.2f,
                 new ConfigDescription("Scales the fog-derived view distance.", new AcceptableValueRange<float>(0.1f, 5f)));
             _nightMultiplier = Config.Bind("Distance", "NightMultiplier", 0.5f,
                 new ConfigDescription("View distance multiplier at night (1 = no change).", new AcceptableValueRange<float>(0f, 1f)));
@@ -104,16 +105,18 @@ namespace ViewConeExplore
             _fillMaxHoleSize = Config.Bind("GapFill", "MaxGapSize", 12,
                 new ConfigDescription("Largest gap that gets filled, in map pixels (1 pixel = 12 x 12 m).", new AcceptableValueRange<int>(1, 200)));
             _horizonEnabled = Config.Bind("Horizon", "Enabled", true,
-                "At sea or on the coast, reveal distant coastlines and peaks that are just barely visible beyond the normal view distance.");
+                "Reveal distant coastlines and peaks that are just barely visible beyond the normal view distance. At sea and on the coast low shores count too, inland only tall peaks.");
             _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1500f,
                 new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
             // Silhouettes against the sky stay visible through much more fog than terrain details.
             _horizonFogMultiplier = Config.Bind("Horizon", "FogMultiplier", 3.5f,
                 new ConfigDescription("Scales the fog-derived distance for coasts and peaks.", new AcceptableValueRange<float>(0.1f, 10f)));
             _horizonMinAngle = Config.Bind("Horizon", "MinAngle", 0.25f,
-                new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.25 means about 4.4 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
+                new ConfigDescription("At sea or on the coast: how far land must rise above the sea, as seen from you, to be noticed (degrees). 0.25 means about 4.4 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
+            _horizonInlandMinAngle = Config.Bind("Horizon", "InlandMinAngle", 1.5f,
+                new ConfigDescription("Away from the sea: how far a peak must rise above your eye level to be noticed (degrees). 1.5 means about 26 m at 1000 m distance. 0 = only at sea and on the coast.", new AcceptableValueRange<float>(0f, 10f)));
             _horizonCoastDistance = Config.Bind("Horizon", "CoastDistance", 60f,
-                new ConfigDescription("Horizon mode is active while you are at sea or open ocean is within this many meters.", new AcceptableValueRange<float>(0f, 300f)));
+                new ConfigDescription("MinAngle applies while you are at sea or open ocean is within this many meters, InlandMinAngle everywhere else.", new AcceptableValueRange<float>(0f, 300f)));
             _calibrationKey = Config.Bind("Debug", "CalibrationKey", new KeyboardShortcut(KeyCode.F8),
                 "Aim the crosshair at terrain you can just barely see and press this key. Distance, height, fog and the computed view distances are shown and written to the BepInEx log.");
 
@@ -166,7 +169,8 @@ namespace ViewConeExplore
         {
             float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
             // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
-            float horizonRange = _horizonEnabled.Value && IsNearOcean(player.transform.position)
+            bool coastal = IsNearOcean(player.transform.position);
+            float horizonRange = _horizonEnabled.Value && (coastal || _horizonInlandMinAngle.Value > 0f)
                 ? GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value)
                 : 0f;
             float farRange = Mathf.Max(range, horizonRange);
@@ -204,7 +208,9 @@ namespace ViewConeExplore
             float forestSight = _forestSightDistance.Value;
             float canopy = _canopyHeight.Value;
             bool horizon = horizonRange > range;
-            float minRiseSlope = Mathf.Tan(_horizonMinAngle.Value * Mathf.Deg2Rad);
+            // At sea, land has to rise above the sea. Inland it has to rise above the eye, against the sky.
+            float riseBase = coastal ? waterLevel : Mathf.Max(eye.y, waterLevel);
+            float minRiseSlope = Mathf.Tan((coastal ? _horizonMinAngle.Value : _horizonInlandMinAngle.Value) * Mathf.Deg2Rad);
             bool changed = false;
 
             if (_cellCache.Count > MaxCacheEntries)
@@ -242,8 +248,8 @@ namespace ViewConeExplore
                             maxSlope = Mathf.Max(maxSlope, slope);
                         }
 
-                        // Too flat or too far away to stand out above the sea: water, low shores, distant lowlands.
-                        if (far && cell.Height - waterLevel < d * minRiseSlope)
+                        // Too flat or too far away to stand out: water, low shores, distant lowlands.
+                        if (far && cell.Height - riseBase < d * minRiseSlope)
                             hidden = true;
 
                         if (forest)
@@ -464,11 +470,12 @@ namespace ViewConeExplore
                 bool water = height < waterLevel;
                 float dist = new Vector2(hit.x - eye.x, hit.z - eye.z).magnitude;
                 float rise = Mathf.Atan2(height - waterLevel, dist) * Mathf.Rad2Deg;
+                float riseOverEye = Mathf.Atan2(height - Mathf.Max(eye.y, waterLevel), dist) * Mathf.Rad2Deg;
                 // FogMultiplier values at which this point would just be inside the view distance.
                 string needed = float.IsInfinity(fogRange) || nightFactor <= 0f
                     ? "n/a"
                     : (dist / (fogRange * nightFactor)).ToString("0.00");
-                target = $"target={(water ? "water" : "land")} dist={dist:0} height={height - waterLevel:0.0} rise={rise:0.000}deg " +
+                target = $"target={(water ? "water" : "land")} dist={dist:0} height={height - waterLevel:0.0} rise={rise:0.000}deg riseOverEye={riseOverEye:0.000}deg " +
                          $"biome={gen.GetBiome(hit.x, hit.z)} at=({hit.x:0},{hit.z:0}) neededFogMultiplier={needed}";
                 summary = $"{(water ? "Water" : "Land")} {dist:0} m away, {height - waterLevel:0} m above sea, {rise:0.00}°";
             }
@@ -477,10 +484,10 @@ namespace ViewConeExplore
                 ? $"fog={RenderSettings.fogMode} density={RenderSettings.fogDensity:0.00000} fogRange={fogRange:0}"
                 : "fog=off";
             Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
-                           $"viewRange={range:0} horizonActive={nearOcean} horizonRange={horizonRange:0} " +
+                           $"viewRange={range:0} coastal={nearOcean} horizonRange={horizonRange:0} " +
                            $"eyeHeight={eye.y - waterLevel:0.0} pos=({pos.x:0},{pos.z:0})");
             player.Message(MessageHud.MessageType.TopLeft,
-                $"{summary}\nView {range:0} m, horizon {(nearOcean ? horizonRange.ToString("0") + " m" : "off")}, fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
+                $"{summary}\nView {range:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
         }
 
         /// <summary>
