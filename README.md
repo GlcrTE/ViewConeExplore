@@ -8,6 +8,7 @@ A Valheim BepInEx mod that reveals the minimap only where you look. Vanilla unco
 - **Dynamic view distance:** Fog, rain and storms shorten your range, and night reduces it.
 - **Line of sight:** Hills and mountains hide what's behind them, while distant peaks stay visible.
 - **Forests block your view:** Dense forest limits sight at ground level, but you can look over it from above. No physics, so it works at any distance.
+- **Horizon mode:** At sea or on the coast, distant coastlines and peaks that you can just barely see are revealed far beyond the normal view distance. Low shores and water stay hidden, and taller land shows up from farther away.
 - **Gap filling:** Small unexplored spots near you are filled in automatically, so the map doesn't turn into a patchwork.
 - **Near radius:** Your immediate surroundings stay revealed all around you.
 - **Fully configurable and lightweight:** Client-side only, no Harmony patches, cached terrain data.
@@ -36,6 +37,11 @@ The mod is client-side only and does not need to be installed on the server.
 | Forest | `ForestSightDistance` | `50` | Meters you can see through dense forest |
 | Forest | `CanopyHeight` | `20` | Tree height in meters |
 | Forest | `DensityMultiplier` | `1.0` | Scales forest density (0 = no forests) |
+| Horizon | `Enabled` | `true` | Reveal distant coasts and peaks at sea or on the coast |
+| Horizon | `MaxDistance` | `1200` | Maximum distance for coasts and peaks (clear weather, daytime) |
+| Horizon | `FogMultiplier` | `3.0` | Scales the fog-derived distance for coasts and peaks |
+| Horizon | `MinAngle` | `0.3` | How far land must rise above the sea to be noticed, in degrees (0.3 ≈ 5 m at 1000 m) |
+| Horizon | `CoastDistance` | `60` | Horizon mode is active while open ocean is within this many meters |
 | GapFill | `FillSmallGaps` | `true` | Fill small enclosed gaps near you |
 | GapFill | `Radius` | `100` | Radius in meters for gap filling |
 | GapFill | `MaxGapSize` | `12` | Largest gap filled, in map pixels (1 px = 12 x 12 m) |

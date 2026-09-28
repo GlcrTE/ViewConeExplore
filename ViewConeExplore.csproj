@@ -14,7 +14,7 @@
     <PathMap>$(MSBuildProjectDirectory)=.</PathMap>
     <Company>View Cone Explore</Company>
     <Product>View Cone Explore</Product>
-    <Version>1.0.1</Version>
+    <Version>1.1.0</Version>
     <GameDir>$(MSBuildThisFileDirectory)..\..\..\</GameDir>
     <Managed>$(GameDir)valheim_Data\Managed\</Managed>
     <BepInExCore>$(GameDir)BepInEx\core\</BepInExCore>

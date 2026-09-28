@@ -17,7 +17,7 @@ namespace ViewConeExplore
     {
         public const string Guid = "valheim.viewconeexplore";
         public const string ModName = "View Cone Explore";
-        public const string Version = "1.0.1";
+        public const string Version = "1.1.0";
 
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<float> _maxDistance;
@@ -36,6 +36,11 @@ namespace ViewConeExplore
         private ConfigEntry<bool> _fillEnabled;
         private ConfigEntry<float> _fillRadius;
         private ConfigEntry<int> _fillMaxHoleSize;
+        private ConfigEntry<bool> _horizonEnabled;
+        private ConfigEntry<float> _horizonMaxDistance;
+        private ConfigEntry<float> _horizonFogMultiplier;
+        private ConfigEntry<float> _horizonMinAngle;
+        private ConfigEntry<float> _horizonCoastDistance;
 
         private Func<Minimap, int, int, bool> _explorePixel;
         private AccessTools.FieldRef<Minimap, Texture2D> _fogTexture;
@@ -48,6 +53,7 @@ namespace ViewConeExplore
 
         private struct Cell
         {
+            public float Height;  // raw terrain height
             public float Ground;  // terrain height, raised to water level over water
             public float Forest;  // 0 = open, 1 = dense forest
         }
@@ -96,6 +102,17 @@ namespace ViewConeExplore
                 new ConfigDescription("Radius in meters around you in which gaps are filled.", new AcceptableValueRange<float>(12f, 300f)));
             _fillMaxHoleSize = Config.Bind("GapFill", "MaxGapSize", 12,
                 new ConfigDescription("Largest gap that gets filled, in map pixels (1 pixel = 12 x 12 m).", new AcceptableValueRange<int>(1, 200)));
+            _horizonEnabled = Config.Bind("Horizon", "Enabled", true,
+                "At sea or on the coast, reveal distant coastlines and peaks that are just barely visible beyond the normal view distance.");
+            _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1200f,
+                new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
+            // Silhouettes against the sky stay visible through much more fog than terrain details.
+            _horizonFogMultiplier = Config.Bind("Horizon", "FogMultiplier", 3f,
+                new ConfigDescription("Scales the fog-derived distance for coasts and peaks.", new AcceptableValueRange<float>(0.1f, 10f)));
+            _horizonMinAngle = Config.Bind("Horizon", "MinAngle", 0.3f,
+                new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.3 means about 5 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
+            _horizonCoastDistance = Config.Bind("Horizon", "CoastDistance", 60f,
+                new ConfigDescription("Horizon mode is active while you are at sea or open ocean is within this many meters.", new AcceptableValueRange<float>(0f, 300f)));
 
             var exploreMethod = AccessTools.Method(typeof(Minimap), "Explore", new[] { typeof(int), typeof(int) });
             if (exploreMethod == null || exploreMethod.ReturnType != typeof(bool))
@@ -141,8 +158,13 @@ namespace ViewConeExplore
 
         private void RevealViewCone(Minimap map, Player player, Camera cam)
         {
-            float range = GetViewDistance();
-            if (range <= 0f)
+            float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
+            // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
+            float horizonRange = _horizonEnabled.Value && IsNearOcean(player.transform.position)
+                ? GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value)
+                : 0f;
+            float farRange = Mathf.Max(range, horizonRange);
+            if (farRange <= 0f)
                 return;
 
             Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
@@ -165,7 +187,7 @@ namespace ViewConeExplore
             float pixelSize = map.m_pixelSize;
             float step = pixelSize * 0.5f;
             // Enough rays that neighbouring rays are less than a map pixel apart at full range.
-            int rayCount = Mathf.Clamp(Mathf.CeilToInt(fovRad * range / (pixelSize * 0.7f)) + 1, 8, 720);
+            int rayCount = Mathf.Clamp(Mathf.CeilToInt(fovRad * farRange / (pixelSize * 0.7f)) + 1, 8, 720);
 
             float baseYaw = Mathf.Atan2(forward.x, forward.z);
             float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
@@ -175,6 +197,8 @@ namespace ViewConeExplore
             bool forest = _forestEnabled.Value && _forestDensityMultiplier.Value > 0f;
             float forestSight = _forestSightDistance.Value;
             float canopy = _canopyHeight.Value;
+            bool horizon = horizonRange > range;
+            float minRiseSlope = Mathf.Tan(_horizonMinAngle.Value * Mathf.Deg2Rad);
             bool changed = false;
 
             if (_cellCache.Count > MaxCacheEntries)
@@ -192,22 +216,29 @@ namespace ViewConeExplore
                 // Once the forest is too thick, only points rising above the canopy line stay visible.
                 float canopySlope = float.NegativeInfinity;
 
-                for (float d = step; d <= range; d += step)
+                for (float d = step; d <= farRange; d += step)
                 {
                     float x = eye.x + dx * d;
                     float z = eye.z + dz * d;
+                    bool far = d > range;
 
-                    if (lineOfSight || forest)
+                    if (lineOfSight || forest || horizon)
                     {
                         Cell cell = GetCell(x, z, step, waterLevel);
                         float slope = (cell.Ground - eye.y) / d;
 
                         bool hidden = false;
-                        if (lineOfSight)
+                        if (lineOfSight || horizon)
                         {
-                            hidden = slope < maxSlope;
+                            // Distant coasts and peaks are only seen where nothing closer blocks them.
+                            if (lineOfSight || far)
+                                hidden = slope < maxSlope;
                             maxSlope = Mathf.Max(maxSlope, slope);
                         }
+
+                        // Too flat or too far away to stand out above the sea: water, low shores, distant lowlands.
+                        if (far && cell.Height - waterLevel < d * minRiseSlope)
+                            hidden = true;
 
                         if (forest)
                         {
@@ -337,10 +368,36 @@ namespace ViewConeExplore
             return gx >= 0 && gy >= 0 && gx < size && gy < size;
         }
 
-        private float GetViewDistance()
+        /// <summary>
+        /// True while the player is on the open sea or within CoastDistance of it. Lakes and rivers do not count.
+        /// </summary>
+        private bool IsNearOcean(Vector3 pos)
         {
-            float max = _maxDistance.Value;
-            float min = Mathf.Min(_minDistance.Value, max);
+            WorldGenerator gen = WorldGenerator.instance;
+            if (gen.GetBiome(pos.x, pos.z) == Heightmap.Biome.Ocean)
+                return true;
+
+            float radius = _horizonCoastDistance.Value;
+            if (radius <= 0f)
+                return false;
+
+            // Sample two rings so narrow bays between the samples are not missed at short distances.
+            for (int ring = 1; ring <= 2; ring++)
+            {
+                float dist = radius * ring * 0.5f;
+                for (int i = 0; i < 12; i++)
+                {
+                    float a = i * (Mathf.PI * 2f / 12f);
+                    if (gen.GetBiome(pos.x + Mathf.Sin(a) * dist, pos.z + Mathf.Cos(a) * dist) == Heightmap.Biome.Ocean)
+                        return true;
+                }
+            }
+            return false;
+        }
+
+        private float GetViewDistance(float max, float min, float fogMultiplier)
+        {
+            min = Mathf.Min(min, max);
             float range = max;
 
             if (_useFog.Value && RenderSettings.fog)
@@ -360,7 +417,7 @@ namespace ViewConeExplore
                         fogRange = density > 0f ? 1.732f / density : max;
                         break;
                 }
-                range = Mathf.Min(range, fogRange * _fogMultiplier.Value);
+                range = Mathf.Min(range, fogRange * fogMultiplier);
             }
 
             if (EnvMan.instance != null)
@@ -384,6 +441,7 @@ namespace ViewConeExplore
                 float wx = (cx + 0.5f) * size;
                 float wz = (cz + 0.5f) * size;
                 float ground = WorldGenerator.instance.GetHeight(wx, wz);
+                cell.Height = ground;
                 cell.Ground = Mathf.Max(ground, waterLevel);
                 cell.Forest = ground > waterLevel + 0.5f ? GetForestDensity(wx, wz) : 0f;
                 _cellCache[key] = cell;
