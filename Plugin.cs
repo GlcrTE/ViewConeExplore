@@ -29,6 +29,7 @@ namespace ViewConeExplore
         private ConfigEntry<float> _nearRadius;
         private ConfigEntry<bool> _lineOfSight;
         private ConfigEntry<float> _interval;
+        private ConfigEntry<float> _frameBudget;
         private ConfigEntry<bool> _forestEnabled;
         private ConfigEntry<float> _forestSightDistance;
         private ConfigEntry<float> _canopyHeight;
@@ -57,7 +58,7 @@ namespace ViewConeExplore
         {
             public float Height;  // raw terrain height
             public float Ground;  // terrain height, raised to water level over water
-            public float Forest;  // 0 = open, 1 = dense forest
+            public float Forest;  // 0 = open, 1 = dense forest, -1 = not computed yet
         }
 
         // World heights and forests are procedural and never change, so caching them is safe.
@@ -66,6 +67,8 @@ namespace ViewConeExplore
         // Same threshold the game uses for WorldGenerator.InForest().
         private const float ForestThreshold = 1.15f;
         private float _timer;
+        private Sweep _sweep;
+        private readonly System.Diagnostics.Stopwatch _budgetTimer = new System.Diagnostics.Stopwatch();
 
         private void Awake()
         {
@@ -89,6 +92,8 @@ namespace ViewConeExplore
                 new ConfigDescription("Vanilla all-around explore radius (vanilla default is 100). Keeps your immediate surroundings revealed.", new AcceptableValueRange<float>(0f, 200f)));
             _interval = Config.Bind("Performance", "UpdateInterval", 0.5f,
                 new ConfigDescription("Seconds between view-cone updates.", new AcceptableValueRange<float>(0.05f, 5f)));
+            _frameBudget = Config.Bind("Performance", "FrameBudgetMs", 2f,
+                new ConfigDescription("Milliseconds per frame spent on the view cone. An update is spread over as many frames as it needs, so a long view distance never causes a stutter. Higher values finish updates sooner.", new AcceptableValueRange<float>(0.2f, 20f)));
             _forestEnabled = Config.Bind("Forest", "ForestBlocksView", true,
                 "Forests block the view when you are at tree level. Looking down on a forest from above still reveals it.");
             _forestSightDistance = Config.Bind("Forest", "ForestSightDistance", 50f,
@@ -150,22 +155,56 @@ namespace ViewConeExplore
             if (_calibrationKey.Value.IsDown())
                 Calibrate(player);
 
-            _timer += Time.deltaTime;
-            if (_timer < _interval.Value)
-                return;
-            _timer = 0f;
-
             if (player.IsDead() || player.InInterior())
+            {
+                _sweep = null;
                 return;
+            }
 
-            Camera cam = Utils.GetMainCamera();
-            if (cam == null)
-                return;
+            _timer += Time.deltaTime;
+            if (_sweep == null || _sweep.Map != map)
+            {
+                if (_timer < _interval.Value)
+                    return;
+                Camera cam = Utils.GetMainCamera();
+                if (cam == null)
+                    return;
+                _timer = 0f;
+                _sweep = StartSweep(map, player, cam);
+                if (_sweep == null)
+                    return;
+            }
 
-            RevealViewCone(map, player, cam);
+            // Spread the rays over several frames so a long view distance never stalls a single frame.
+            _budgetTimer.Restart();
+            float budgetMs = _frameBudget.Value;
+            while (_sweep.NextRay < _sweep.RayCount)
+            {
+                TraceRay(_sweep, _sweep.NextRay++);
+                if (_budgetTimer.Elapsed.TotalMilliseconds >= budgetMs)
+                    return;
+            }
+
+            if (_fillEnabled.Value && _explored != null && FillSmallGaps(map, player.transform.position))
+                _sweep.Changed = true;
+            if (_sweep.Changed)
+                _fogTexture(map).Apply();
+            _sweep = null;
         }
 
-        private void RevealViewCone(Minimap map, Player player, Camera cam)
+        /// <summary>One pass over the view cone, captured when it starts and traced over several frames.</summary>
+        private sealed class Sweep
+        {
+            public Minimap Map;
+            public Vector3 Eye;
+            public float BaseYaw, FovRad, Range, FarRange, Step, FarStep, WaterLevel;
+            public int RayCount, NextRay, TextureSize, Half;
+            public float PixelSize;
+            public bool LineOfSight, Forest, Horizon, Changed;
+            public float ForestSight, Canopy, RiseBase, MinRiseSlope;
+        }
+
+        private Sweep StartSweep(Minimap map, Player player, Camera cam)
         {
             float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
             // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
@@ -175,7 +214,7 @@ namespace ViewConeExplore
                 : 0f;
             float farRange = Mathf.Max(range, horizonRange);
             if (farRange <= 0f)
-                return;
+                return null;
 
             Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
 
@@ -195,95 +234,102 @@ namespace ViewConeExplore
             float fovRad = Mathf.Clamp(fovDeg, 1f, 360f) * Mathf.Deg2Rad;
 
             float pixelSize = map.m_pixelSize;
-            float step = pixelSize * 0.5f;
-            // Enough rays that neighbouring rays are less than a map pixel apart at full range.
-            int rayCount = Mathf.Clamp(Mathf.CeilToInt(fovRad * farRange / (pixelSize * 0.7f)) + 1, 8, 720);
-
-            float baseYaw = Mathf.Atan2(forward.x, forward.z);
             float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
-            int textureSize = map.m_textureSize;
-            int half = textureSize / 2;
-            bool lineOfSight = _lineOfSight.Value;
-            bool forest = _forestEnabled.Value && _forestDensityMultiplier.Value > 0f;
-            float forestSight = _forestSightDistance.Value;
-            float canopy = _canopyHeight.Value;
-            bool horizon = horizonRange > range;
-            // At sea, land has to rise above the sea. Inland it has to rise above the eye, against the sky.
-            float riseBase = coastal ? waterLevel : Mathf.Max(eye.y, waterLevel);
-            float minRiseSlope = Mathf.Tan((coastal ? _horizonMinAngle.Value : _horizonInlandMinAngle.Value) * Mathf.Deg2Rad);
-            bool changed = false;
 
             if (_cellCache.Count > MaxCacheEntries)
                 _cellCache.Clear();
 
-            for (int r = 0; r < rayCount; r++)
+            return new Sweep
             {
-                float t = rayCount == 1 ? 0.5f : (float)r / (rayCount - 1);
-                float yaw = baseYaw - fovRad * 0.5f + fovRad * t;
-                float dx = Mathf.Sin(yaw);
-                float dz = Mathf.Cos(yaw);
-                float maxSlope = float.NegativeInfinity;
-                // Meters of dense forest the ray has passed through at tree level.
-                float forestDepth = 0f;
-                // Once the forest is too thick, only points rising above the canopy line stay visible.
-                float canopySlope = float.NegativeInfinity;
+                Map = map,
+                Eye = eye,
+                BaseYaw = Mathf.Atan2(forward.x, forward.z),
+                FovRad = fovRad,
+                Range = range,
+                FarRange = farRange,
+                Step = pixelSize * 0.5f,
+                // Beyond the normal range only large silhouettes count, so one sample per map pixel is enough.
+                FarStep = pixelSize,
+                WaterLevel = waterLevel,
+                // Enough rays that neighbouring rays are less than a map pixel apart at full range.
+                RayCount = Mathf.Clamp(Mathf.CeilToInt(fovRad * farRange / (pixelSize * 0.7f)) + 1, 8, 720),
+                TextureSize = map.m_textureSize,
+                Half = map.m_textureSize / 2,
+                PixelSize = pixelSize,
+                LineOfSight = _lineOfSight.Value,
+                Forest = _forestEnabled.Value && _forestDensityMultiplier.Value > 0f,
+                Horizon = horizonRange > range,
+                ForestSight = _forestSightDistance.Value,
+                Canopy = _canopyHeight.Value,
+                // At sea, land has to rise above the sea. Inland it has to rise above the eye, against the sky.
+                RiseBase = coastal ? waterLevel : Mathf.Max(eye.y, waterLevel),
+                MinRiseSlope = Mathf.Tan((coastal ? _horizonMinAngle.Value : _horizonInlandMinAngle.Value) * Mathf.Deg2Rad),
+            };
+        }
 
-                for (float d = step; d <= farRange; d += step)
+        private void TraceRay(Sweep s, int r)
+        {
+            float t = s.RayCount == 1 ? 0.5f : (float)r / (s.RayCount - 1);
+            float yaw = s.BaseYaw - s.FovRad * 0.5f + s.FovRad * t;
+            float dx = Mathf.Sin(yaw);
+            float dz = Mathf.Cos(yaw);
+            Vector3 eye = s.Eye;
+            float maxSlope = float.NegativeInfinity;
+            // Meters of dense forest the ray has passed through at tree level.
+            float forestDepth = 0f;
+            // Once the forest is too thick, only points rising above the canopy line stay visible.
+            float canopySlope = float.NegativeInfinity;
+
+            for (float d = s.Step; d <= s.FarRange; d += d > s.Range ? s.FarStep : s.Step)
+            {
+                float x = eye.x + dx * d;
+                float z = eye.z + dz * d;
+                bool far = d > s.Range;
+
+                if (s.LineOfSight || s.Forest || s.Horizon)
                 {
-                    float x = eye.x + dx * d;
-                    float z = eye.z + dz * d;
-                    bool far = d > range;
+                    Cell cell = GetCell(x, z, s.Step, s.WaterLevel);
+                    float slope = (cell.Ground - eye.y) / d;
 
-                    if (lineOfSight || forest || horizon)
+                    bool hidden = false;
+                    if (s.LineOfSight || s.Horizon)
                     {
-                        Cell cell = GetCell(x, z, step, waterLevel);
-                        float slope = (cell.Ground - eye.y) / d;
-
-                        bool hidden = false;
-                        if (lineOfSight || horizon)
-                        {
-                            // Distant coasts and peaks are only seen where nothing closer blocks them.
-                            if (lineOfSight || far)
-                                hidden = slope < maxSlope;
-                            maxSlope = Mathf.Max(maxSlope, slope);
-                        }
-
-                        // Too flat or too far away to stand out: water, low shores, distant lowlands.
-                        if (far && cell.Height - riseBase < d * minRiseSlope)
-                            hidden = true;
-
-                        if (forest)
-                        {
-                            if (forestDepth >= forestSight && slope < canopySlope)
-                                hidden = true;
-
-                            if (cell.Forest > 0f && eye.y - cell.Ground < canopy)
-                            {
-                                forestDepth += cell.Forest * step;
-                                if (forestDepth >= forestSight)
-                                    canopySlope = Mathf.Max(canopySlope, (cell.Ground + canopy - eye.y) / d);
-                            }
-                        }
-
-                        if (hidden)
-                            continue;
+                        // Distant coasts and peaks are only seen where nothing closer blocks them.
+                        if (s.LineOfSight || far)
+                            hidden = slope < maxSlope;
+                        maxSlope = Mathf.Max(maxSlope, slope);
                     }
 
-                    int px = Mathf.RoundToInt(x / pixelSize + half);
-                    int py = Mathf.RoundToInt(z / pixelSize + half);
-                    if (px < 0 || py < 0 || px >= textureSize || py >= textureSize)
-                        break;
+                    // Too flat or too far away to stand out: water, low shores, distant lowlands.
+                    if (far && cell.Height - s.RiseBase < d * s.MinRiseSlope)
+                        hidden = true;
 
-                    if (_explorePixel(map, px, py))
-                        changed = true;
+                    if (s.Forest)
+                    {
+                        if (forestDepth >= s.ForestSight && slope < canopySlope)
+                            hidden = true;
+
+                        if (cell.Forest != 0f && eye.y - cell.Ground < s.Canopy
+                            && GetCellForest(ref cell, x, z, s.Step) > 0f)
+                        {
+                            forestDepth += cell.Forest * (far ? s.FarStep : s.Step);
+                            if (forestDepth >= s.ForestSight)
+                                canopySlope = Mathf.Max(canopySlope, (cell.Ground + s.Canopy - eye.y) / d);
+                        }
+                    }
+
+                    if (hidden)
+                        continue;
                 }
+
+                int px = Mathf.RoundToInt(x / s.PixelSize + s.Half);
+                int py = Mathf.RoundToInt(z / s.PixelSize + s.Half);
+                if (px < 0 || py < 0 || px >= s.TextureSize || py >= s.TextureSize)
+                    break;
+
+                if (_explorePixel(s.Map, px, py))
+                    s.Changed = true;
             }
-
-            if (_fillEnabled.Value && _explored != null && FillSmallGaps(map, player.transform.position))
-                changed = true;
-
-            if (changed)
-                _fogTexture(map).Apply();
         }
 
         /// <summary>
@@ -536,20 +582,35 @@ namespace ViewConeExplore
 
         private Cell GetCell(float x, float z, float size, float waterLevel)
         {
-            int cx = Mathf.FloorToInt(x / size);
-            int cz = Mathf.FloorToInt(z / size);
-            long key = ((long)cx << 32) ^ (uint)cz;
+            long key = CellKey(x, z, size, out int cx, out int cz);
             if (!_cellCache.TryGetValue(key, out Cell cell))
             {
-                float wx = (cx + 0.5f) * size;
-                float wz = (cz + 0.5f) * size;
-                float ground = WorldGenerator.instance.GetHeight(wx, wz);
+                float ground = WorldGenerator.instance.GetHeight((cx + 0.5f) * size, (cz + 0.5f) * size);
                 cell.Height = ground;
                 cell.Ground = Mathf.Max(ground, waterLevel);
-                cell.Forest = ground > waterLevel + 0.5f ? GetForestDensity(wx, wz) : 0f;
+                // Forest is only needed for cells near eye level, so it is computed on first use.
+                cell.Forest = ground > waterLevel + 0.5f ? -1f : 0f;
                 _cellCache[key] = cell;
             }
             return cell;
+        }
+
+        private float GetCellForest(ref Cell cell, float x, float z, float size)
+        {
+            if (cell.Forest < 0f)
+            {
+                long key = CellKey(x, z, size, out int cx, out int cz);
+                cell.Forest = GetForestDensity((cx + 0.5f) * size, (cz + 0.5f) * size);
+                _cellCache[key] = cell;
+            }
+            return cell.Forest;
+        }
+
+        private static long CellKey(float x, float z, float size, out int cx, out int cz)
+        {
+            cx = Mathf.FloorToInt(x / size);
+            cz = Mathf.FloorToInt(z / size);
+            return ((long)cx << 32) ^ (uint)cz;
         }
 
         private float GetForestDensity(float x, float z)

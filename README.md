@@ -48,6 +48,7 @@ The mod is client-side only and does not need to be installed on the server.
 | GapFill | `MaxGapSize` | `12` | Largest gap filled, in map pixels (1 px = 12 x 12 m) |
 | Vanilla | `NearRadius` | `15` | Vanilla all-around explore radius (vanilla default: 100) |
 | Performance | `UpdateInterval` | `0.5` | Seconds between updates |
+| Performance | `FrameBudgetMs` | `2` | Milliseconds per frame for the view cone; updates are spread over several frames |
 | Debug | `CalibrationKey` | `F8` | Measures the terrain in the crosshair and logs distance, height, fog and view distances |
 
 ## Compatibility
