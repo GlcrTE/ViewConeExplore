@@ -277,11 +277,24 @@ namespace ViewConeExplore
         private void TraceRay(Sweep s, int r)
         {
             float t = s.RayCount == 1 ? 0.5f : (float)r / (s.RayCount - 1);
-            float yaw = s.BaseYaw - s.FovRad * 0.5f + s.FovRad * t;
+            TraceYaw(s, s.BaseYaw - s.FovRad * 0.5f + s.FovRad * t, -1f);
+        }
+
+        /// <summary>
+        /// Walks one ray and explores every visible map pixel on it. With probeDist >= 0 nothing is
+        /// explored; instead the verdict for the point at that distance is returned (calibration).
+        /// </summary>
+        private string TraceYaw(Sweep s, float yaw, float probeDist)
+        {
+            bool probe = probeDist >= 0f;
+            if (probe && probeDist > s.FarRange)
+                return $"beyond range ({s.FarRange:0} m)";
+
             float dx = Mathf.Sin(yaw);
             float dz = Mathf.Cos(yaw);
             Vector3 eye = s.Eye;
             float maxSlope = float.NegativeInfinity;
+            float maxSlopeDist = 0f;
             // Meters of dense forest the ray has passed through at tree level.
             float forestDepth = 0f;
             // Once the forest is too thick, only points rising above the canopy line stay visible.
@@ -292,29 +305,33 @@ namespace ViewConeExplore
                 float x = eye.x + dx * d;
                 float z = eye.z + dz * d;
                 bool far = d > s.Range;
+                bool atProbe = probe && d >= probeDist;
 
                 if (s.LineOfSight || s.Forest || s.Horizon)
                 {
                     Cell cell = GetCell(x, z, s.Step, s.WaterLevel);
                     float slope = (cell.Ground - eye.y) / d;
 
-                    bool hidden = false;
+                    bool terrainHidden = false;
                     if (s.LineOfSight || s.Horizon)
                     {
                         // Distant coasts and peaks are only seen where nothing closer blocks them.
                         if (s.LineOfSight || far)
-                            hidden = slope < maxSlope;
-                        maxSlope = Mathf.Max(maxSlope, slope);
+                            terrainHidden = slope < maxSlope;
+                        if (slope > maxSlope)
+                        {
+                            maxSlope = slope;
+                            maxSlopeDist = d;
+                        }
                     }
 
                     // Too flat or too far away to stand out: water, low shores, distant lowlands.
-                    if (far && cell.Height - s.RiseBase < d * s.MinRiseSlope)
-                        hidden = true;
+                    bool tooFlat = far && cell.Height - s.RiseBase < d * s.MinRiseSlope;
 
+                    bool forestHidden = false;
                     if (s.Forest)
                     {
-                        if (forestDepth >= s.ForestSight && slope < canopySlope)
-                            hidden = true;
+                        forestHidden = forestDepth >= s.ForestSight && slope < canopySlope;
 
                         if (cell.Forest != 0f && eye.y - cell.Ground < s.Canopy
                             && GetCellForest(ref cell, x, z, s.Step) > 0f)
@@ -325,9 +342,27 @@ namespace ViewConeExplore
                         }
                     }
 
-                    if (hidden)
+                    if (atProbe)
+                    {
+                        if (terrainHidden)
+                            return $"hidden by terrain {maxSlopeDist:0} m away ({Mathf.Atan(maxSlope) * Mathf.Rad2Deg:0.0} deg, target {Mathf.Atan(slope) * Mathf.Rad2Deg:0.0} deg)";
+                        if (tooFlat)
+                            return $"too flat for horizon mode (needs {Mathf.Atan(s.MinRiseSlope) * Mathf.Rad2Deg:0.00} deg, has {Mathf.Atan2(cell.Height - s.RiseBase, d) * Mathf.Rad2Deg:0.00} deg)";
+                        if (forestHidden)
+                            return "hidden by forest";
+                        return far ? "visible (horizon mode)" : "visible";
+                    }
+
+                    if (terrainHidden || tooFlat || forestHidden)
                         continue;
                 }
+                else if (atProbe)
+                {
+                    return "visible";
+                }
+
+                if (probe)
+                    continue;
 
                 int px = Mathf.RoundToInt(x / s.PixelSize + s.Half);
                 int py = Mathf.RoundToInt(z / s.PixelSize + s.Half);
@@ -337,6 +372,7 @@ namespace ViewConeExplore
                 if (_explorePixel(s.Map, px, py))
                     s.Changed = true;
             }
+            return probe ? "not reached" : null;
         }
 
         /// <summary>
@@ -529,9 +565,25 @@ namespace ViewConeExplore
                 string needed = float.IsInfinity(fogRange) || nightFactor <= 0f
                     ? "n/a"
                     : (dist / (fogRange * nightFactor)).ToString("0.00");
+                // Run the same ray the view cone uses towards this point, without exploring anything.
+                string verdict = "n/a";
+                string explored = "?";
+                Minimap map = Minimap.instance;
+                Sweep probe = map != null ? StartSweep(map, player, cam) : null;
+                if (probe != null)
+                {
+                    verdict = TraceYaw(probe, Mathf.Atan2(hit.x - eye.x, hit.z - eye.z), dist);
+                    BitArray bits = _explored?.Invoke(map);
+                    int px = Mathf.RoundToInt(hit.x / probe.PixelSize + probe.Half);
+                    int py = Mathf.RoundToInt(hit.z / probe.PixelSize + probe.Half);
+                    if (bits != null && px >= 0 && py >= 0 && px < probe.TextureSize && py < probe.TextureSize)
+                        explored = bits[py * probe.TextureSize + px] ? "yes" : "no";
+                }
                 target = $"target={(water ? "water" : "land")} dist={dist:0} height={height - waterLevel:0.0} rise={rise:0.000}deg riseOverEye={riseOverEye:0.000}deg " +
-                         $"biome={gen.GetBiome(hit.x, hit.z)} at=({hit.x:0},{hit.z:0}) neededFogMultiplier={needed}";
-                summary = $"{(water ? "Water" : "Land")} {dist:0} m away, {height - waterLevel:0} m above sea, {rise:0.00}°";
+                         $"biome={gen.GetBiome(hit.x, hit.z)} at=({hit.x:0},{hit.z:0}) neededFogMultiplier={needed} " +
+                         $"explored={explored} verdict=\"{verdict}\"";
+                summary = $"{(water ? "Water" : "Land")} {dist:0} m away, {height - waterLevel:0} m above sea, {rise:0.00}°\n" +
+                          $"Explored: {explored}, mod: {verdict}";
             }
 
             string fog = RenderSettings.fog
@@ -539,7 +591,7 @@ namespace ViewConeExplore
                 : "fog=off";
             Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
                            $"viewRange={range:0} maxDistance={GetMaxDistance():0} heightBonus={heightBonus:0.00} coastal={nearOcean} horizonRange={horizonRange:0} " +
-                           $"eyeHeight={eye.y - waterLevel:0.0} pos=({pos.x:0},{pos.z:0})");
+                           $"eyeHeight={eye.y - waterLevel:0.0} cameraAboveEye={origin.y - eye.y:0.0} pos=({pos.x:0},{pos.z:0})");
             player.Message(MessageHud.MessageType.TopLeft,
                 $"{summary}\nView {range:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
         }
