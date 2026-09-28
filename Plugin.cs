@@ -41,6 +41,7 @@ namespace ViewConeExplore
         private ConfigEntry<float> _horizonFogMultiplier;
         private ConfigEntry<float> _horizonMinAngle;
         private ConfigEntry<float> _horizonCoastDistance;
+        private ConfigEntry<KeyboardShortcut> _calibrationKey;
 
         private Func<Minimap, int, int, bool> _explorePixel;
         private AccessTools.FieldRef<Minimap, Texture2D> _fogTexture;
@@ -113,6 +114,8 @@ namespace ViewConeExplore
                 new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.3 means about 5 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
             _horizonCoastDistance = Config.Bind("Horizon", "CoastDistance", 60f,
                 new ConfigDescription("Horizon mode is active while you are at sea or open ocean is within this many meters.", new AcceptableValueRange<float>(0f, 300f)));
+            _calibrationKey = Config.Bind("Debug", "CalibrationKey", new KeyboardShortcut(KeyCode.F8),
+                "Aim the crosshair at terrain you can just barely see and press this key. Distance, height, fog and the computed view distances are shown and written to the BepInEx log.");
 
             var exploreMethod = AccessTools.Method(typeof(Minimap), "Explore", new[] { typeof(int), typeof(int) });
             if (exploreMethod == null || exploreMethod.ReturnType != typeof(bool))
@@ -140,6 +143,9 @@ namespace ViewConeExplore
                 return;
 
             map.m_exploreRadius = _nearRadius.Value;
+
+            if (_calibrationKey.Value.IsDown())
+                Calibrate(player);
 
             _timer += Time.deltaTime;
             if (_timer < _interval.Value)
@@ -395,38 +401,128 @@ namespace ViewConeExplore
             return false;
         }
 
+        /// <summary>
+        /// Follows the camera ray through the generated terrain and reports what it hits, next to the
+        /// current fog and the view distances the mod would use, so the settings can be tuned to what
+        /// is actually visible.
+        /// </summary>
+        private void Calibrate(Player player)
+        {
+            Camera cam = Utils.GetMainCamera();
+            if (cam == null)
+                return;
+
+            WorldGenerator gen = WorldGenerator.instance;
+            float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
+            Vector3 origin = cam.transform.position;
+            Vector3 dir = cam.transform.forward;
+            Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
+
+            // March along the ray, then narrow the hit down by bisection.
+            const float step = 2f;
+            const float maxRay = 4000f;
+            float hitT = -1f;
+            for (float t = step; t <= maxRay; t += step)
+            {
+                Vector3 p = origin + dir * t;
+                if (p.y > Mathf.Max(gen.GetHeight(p.x, p.z), waterLevel))
+                    continue;
+                float lo = t - step, hi = t;
+                for (int i = 0; i < 12; i++)
+                {
+                    float mid = (lo + hi) * 0.5f;
+                    Vector3 m = origin + dir * mid;
+                    if (m.y > Mathf.Max(gen.GetHeight(m.x, m.z), waterLevel))
+                        lo = mid;
+                    else
+                        hi = mid;
+                }
+                hitT = hi;
+                break;
+            }
+
+            float fogRange = GetFogRange();
+            float daylight = GetDaylight();
+            float nightFactor = Mathf.Lerp(_nightMultiplier.Value, 1f, daylight);
+            float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
+            bool nearOcean = IsNearOcean(player.transform.position);
+            float horizonRange = GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value);
+            string env = EnvMan.instance?.GetCurrentEnvironment()?.m_name ?? "?";
+            Vector3 pos = player.transform.position;
+
+            string target;
+            string summary;
+            if (hitT < 0f)
+            {
+                target = "target=none (sky or beyond " + maxRay + " m)";
+                summary = "No terrain in the crosshair";
+            }
+            else
+            {
+                Vector3 hit = origin + dir * hitT;
+                float height = gen.GetHeight(hit.x, hit.z);
+                bool water = height < waterLevel;
+                float dist = new Vector2(hit.x - eye.x, hit.z - eye.z).magnitude;
+                float rise = Mathf.Atan2(height - waterLevel, dist) * Mathf.Rad2Deg;
+                // FogMultiplier values at which this point would just be inside the view distance.
+                string needed = float.IsInfinity(fogRange) || nightFactor <= 0f
+                    ? "n/a"
+                    : (dist / (fogRange * nightFactor)).ToString("0.00");
+                target = $"target={(water ? "water" : "land")} dist={dist:0} height={height - waterLevel:0.0} rise={rise:0.000}deg " +
+                         $"biome={gen.GetBiome(hit.x, hit.z)} at=({hit.x:0},{hit.z:0}) neededFogMultiplier={needed}";
+                summary = $"{(water ? "Water" : "Land")} {dist:0} m away, {height - waterLevel:0} m above sea, {rise:0.00}°";
+            }
+
+            string fog = RenderSettings.fog
+                ? $"fog={RenderSettings.fogMode} density={RenderSettings.fogDensity:0.00000} fogRange={fogRange:0}"
+                : "fog=off";
+            Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
+                           $"viewRange={range:0} horizonActive={nearOcean} horizonRange={horizonRange:0} " +
+                           $"eyeHeight={eye.y - waterLevel:0.0} pos=({pos.x:0},{pos.z:0})");
+            player.Message(MessageHud.MessageType.TopLeft,
+                $"{summary}\nView {range:0} m, horizon {(nearOcean ? horizonRange.ToString("0") + " m" : "off")}, fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
+        }
+
+        /// <summary>
+        /// Distance at which the fog swallows terrain completely, before FogMultiplier. Infinity without fog.
+        /// </summary>
+        private static float GetFogRange()
+        {
+            if (!RenderSettings.fog)
+                return float.PositiveInfinity;
+
+            float density = RenderSettings.fogDensity;
+            switch (RenderSettings.fogMode)
+            {
+                case FogMode.Linear:
+                    return RenderSettings.fogEndDistance;
+                case FogMode.Exponential:
+                    // Visibility ends where fog transmittance drops below ~5% (ln 20 ≈ 3).
+                    return density > 0f ? 3f / density : float.PositiveInfinity;
+                default:
+                    return density > 0f ? 1.732f / density : float.PositiveInfinity;
+            }
+        }
+
+        /// <summary>1 during the day, 0 at night, blended smoothly around dawn and dusk.</summary>
+        private static float GetDaylight()
+        {
+            if (EnvMan.instance == null)
+                return 1f;
+            // Day fraction: 0 = midnight, 0.5 = noon. Blend around dawn (0.25) and dusk (0.75).
+            float frac = EnvMan.instance.GetDayFraction();
+            return Mathf.Clamp01((0.25f - Mathf.Abs(frac - 0.5f)) / 0.05f + 0.5f);
+        }
+
         private float GetViewDistance(float max, float min, float fogMultiplier)
         {
             min = Mathf.Min(min, max);
             float range = max;
 
-            if (_useFog.Value && RenderSettings.fog)
-            {
-                float density = RenderSettings.fogDensity;
-                float fogRange;
-                switch (RenderSettings.fogMode)
-                {
-                    case FogMode.Linear:
-                        fogRange = RenderSettings.fogEndDistance;
-                        break;
-                    case FogMode.Exponential:
-                        // Visibility ends where fog transmittance drops below ~5% (ln 20 ≈ 3).
-                        fogRange = density > 0f ? 3f / density : max;
-                        break;
-                    default:
-                        fogRange = density > 0f ? 1.732f / density : max;
-                        break;
-                }
-                range = Mathf.Min(range, fogRange * fogMultiplier);
-            }
+            if (_useFog.Value)
+                range = Mathf.Min(range, GetFogRange() * fogMultiplier);
 
-            if (EnvMan.instance != null)
-            {
-                // Day fraction: 0 = midnight, 0.5 = noon. Blend smoothly around dawn (0.25) and dusk (0.75).
-                float frac = EnvMan.instance.GetDayFraction();
-                float daylight = Mathf.Clamp01((0.25f - Mathf.Abs(frac - 0.5f)) / 0.05f + 0.5f);
-                range *= Mathf.Lerp(_nightMultiplier.Value, 1f, daylight);
-            }
+            range *= Mathf.Lerp(_nightMultiplier.Value, 1f, GetDaylight());
 
             return Mathf.Clamp(range, min, max);
         }
