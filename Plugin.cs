@@ -17,11 +17,13 @@ namespace ViewConeExplore
     {
         public const string Guid = "valheim.viewconeexplore";
         public const string ModName = "View Cone Explore";
-        public const string Version = "1.1.0";
+        public const string Version = "1.2.0";
 
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<float> _maxDistance;
         private ConfigEntry<float> _minDistance;
+        private ConfigEntry<float> _heightBonusPerMeter;
+        private ConfigEntry<float> _heightBonusMax;
         private ConfigEntry<bool> _useFog;
         private ConfigEntry<float> _fogMultiplier;
         private ConfigEntry<float> _nightMultiplier;
@@ -63,7 +65,7 @@ namespace ViewConeExplore
 
         // World heights and forests are procedural and never change, so caching them is safe.
         private readonly Dictionary<long, Cell> _cellCache = new Dictionary<long, Cell>();
-        private const int MaxCacheEntries = 400000;
+        private const int MaxCacheEntries = 600000;
         // Same threshold the game uses for WorldGenerator.InForest().
         private const float ForestThreshold = 1.15f;
         private float _timer;
@@ -75,6 +77,10 @@ namespace ViewConeExplore
             _enabled = Config.Bind("General", "Enabled", true, "Enable view-cone map exploration.");
             _maxDistance = Config.Bind("Distance", "MaxDistance", 0f,
                 new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance setting (224 m on Low up to 544 m on Extreme).", new AcceptableValueRange<float>(0f, 2000f)));
+            _heightBonusPerMeter = Config.Bind("Distance", "HeightBonusPerMeter", 1f,
+                new ConfigDescription("Percent added to the maximum view distances (normal and horizon) per meter your eye is above the sea. Fog still limits the view. 0 = no height bonus.", new AcceptableValueRange<float>(0f, 10f)));
+            _heightBonusMax = Config.Bind("Distance", "HeightBonusMax", 100f,
+                new ConfigDescription("Largest height bonus in percent.", new AcceptableValueRange<float>(0f, 500f)));
             _minDistance = Config.Bind("Distance", "MinDistance", 80f,
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
@@ -206,17 +212,19 @@ namespace ViewConeExplore
 
         private Sweep StartSweep(Minimap map, Player player, Camera cam)
         {
-            float range = GetViewDistance(GetMaxDistance(), _minDistance.Value, _fogMultiplier.Value);
+            Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
+            float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
+            float heightBonus = GetHeightBonus(eye.y, waterLevel);
+
+            float range = GetViewDistance(GetMaxDistance() * heightBonus, _minDistance.Value, _fogMultiplier.Value);
             // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
             bool coastal = IsNearOcean(player.transform.position);
             float horizonRange = _horizonEnabled.Value && (coastal || _horizonInlandMinAngle.Value > 0f)
-                ? GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value)
+                ? GetViewDistance(_horizonMaxDistance.Value * heightBonus, 0f, _horizonFogMultiplier.Value)
                 : 0f;
             float farRange = Mathf.Max(range, horizonRange);
             if (farRange <= 0f)
                 return null;
-
-            Vector3 eye = player.m_eye != null ? player.m_eye.position : player.transform.position + Vector3.up * 1.7f;
 
             Vector3 forward = cam.transform.forward;
             forward.y = 0f;
@@ -234,7 +242,6 @@ namespace ViewConeExplore
             float fovRad = Mathf.Clamp(fovDeg, 1f, 360f) * Mathf.Deg2Rad;
 
             float pixelSize = map.m_pixelSize;
-            float waterLevel = ZoneSystem.instance != null ? ZoneSystem.instance.m_waterLevel : 30f;
 
             if (_cellCache.Count > MaxCacheEntries)
                 _cellCache.Clear();
@@ -496,9 +503,10 @@ namespace ViewConeExplore
             float fogRange = GetFogRange();
             float daylight = GetDaylight();
             float nightFactor = Mathf.Lerp(_nightMultiplier.Value, 1f, daylight);
-            float range = GetViewDistance(GetMaxDistance(), _minDistance.Value, _fogMultiplier.Value);
+            float heightBonus = GetHeightBonus(eye.y, waterLevel);
+            float range = GetViewDistance(GetMaxDistance() * heightBonus, _minDistance.Value, _fogMultiplier.Value);
             bool nearOcean = IsNearOcean(player.transform.position);
-            float horizonRange = GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value);
+            float horizonRange = GetViewDistance(_horizonMaxDistance.Value * heightBonus, 0f, _horizonFogMultiplier.Value);
             string env = EnvMan.instance?.GetCurrentEnvironment()?.m_name ?? "?";
             Vector3 pos = player.transform.position;
 
@@ -530,10 +538,19 @@ namespace ViewConeExplore
                 ? $"fog={RenderSettings.fogMode} density={RenderSettings.fogDensity:0.00000} fogRange={fogRange:0}"
                 : "fog=off";
             Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
-                           $"viewRange={range:0} maxDistance={GetMaxDistance():0} coastal={nearOcean} horizonRange={horizonRange:0} " +
+                           $"viewRange={range:0} maxDistance={GetMaxDistance():0} heightBonus={heightBonus:0.00} coastal={nearOcean} horizonRange={horizonRange:0} " +
                            $"eyeHeight={eye.y - waterLevel:0.0} pos=({pos.x:0},{pos.z:0})");
             player.Message(MessageHud.MessageType.TopLeft,
                 $"{summary}\nView {range:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
+        }
+
+        /// <summary>
+        /// Multiplier for the maximum distances: the higher your eye above the sea, the farther you can see.
+        /// </summary>
+        private float GetHeightBonus(float eyeY, float waterLevel)
+        {
+            float height = Mathf.Max(0f, eyeY - waterLevel);
+            return 1f + Mathf.Min(height * _heightBonusPerMeter.Value, _heightBonusMax.Value) / 100f;
         }
 
         /// <summary>

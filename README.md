@@ -9,6 +9,7 @@ A Valheim BepInEx mod that reveals the minimap only where you look. Vanilla unco
 - **Line of sight:** Hills and mountains hide what's behind them, while distant peaks stay visible.
 - **Forests block your view:** Dense forest limits sight at ground level, but you can look over it from above. No physics, so it works at any distance.
 - **Horizon mode:** Distant coastlines and peaks that you can just barely see are revealed far beyond the normal view distance. At sea and on the coast even low shores count; inland only tall peaks rising above you against the sky. Water and flat land stay hidden, and taller land shows up from farther away.
+- **Height bonus:** The higher you stand above the sea, on a hill, a cliff or a mast, the farther you can see. Fog still limits the view.
 - **Gap filling:** Small unexplored spots near you are filled in automatically, so the map doesn't turn into a patchwork.
 - **Near radius:** Your immediate surroundings stay revealed all around you.
 - **Fully configurable and lightweight:** Client-side only, no Harmony patches, cached terrain data.
@@ -27,6 +28,8 @@ The mod is client-side only and does not need to be installed on the server.
 |---|---|---|---|
 | General | `Enabled` | `true` | Enable view-cone map exploration |
 | Distance | `MaxDistance` | `0` | Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance (Low 224 m, Medium/Classic 288 m, High 352 m, Very High 416 m, Ultra 480 m, Extreme 544 m) |
+| Distance | `HeightBonusPerMeter` | `1` | Percent added to the maximum view distances per meter your eye is above the sea (0 = off) |
+| Distance | `HeightBonusMax` | `100` | Largest height bonus in percent |
 | Distance | `MinDistance` | `80` | The reveal distance never drops below this |
 | Distance | `UseFogVisibility` | `true` | Derive the view distance from the current fog density |
 | Distance | `FogMultiplier` | `2.2` | Scales the fog-derived view distance |

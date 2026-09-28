@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+- **Height bonus:** The higher your eye is above the sea, the farther you can see. By default each meter adds 1% to the maximum view distance and the horizon range, up to +100% (`[Distance] HeightBonusPerMeter`, `HeightBonusMax`). On Extreme (544 m), that is about 555 m on deck, 625 m 15 m up, and 870 m on a 60 m hill. Fog still limits the view, so height only helps in clear weather.
+
 ## 1.1.0
 
 ### Added
