@@ -32,7 +32,7 @@ The mod is client-side only and does not need to be installed on the server.
 | Distance | `HeightBonusToggleKey` | `F7` | Switches the height bonus; turning it on needs a second press within 3 seconds |
 | Distance | `HeightBonusMaxFactor` | `8` | The height bonus reaches at most this many times the draw distance |
 | Distance | `SnowVisibility` | `0.55` | Scales all fog-based distances while it is snowing |
-| Distance | `MinDistance` | `80` | The reveal distance never drops below this |
+| Distance | `MinDistance` | `0` | The reveal distance never drops below this (0 = follow the fog exactly) |
 | Distance | `UseFogVisibility` | `true` | Derive the view distance from the current fog density |
 | Distance | `FogMultiplier` | `2.2` | Scales the fog-derived view distance |
 | Distance | `NightMultiplier` | `0.5` | View distance multiplier at night |

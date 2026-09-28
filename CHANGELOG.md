@@ -8,6 +8,9 @@
 - **Snowfall** shortens all fog-based distances (`SnowVisibility`, 0.55). From a 100 m peak in snow, outlines faded at about 850 m, roughly half of what the fog density alone predicts.
 - The calibration key now also shows whether the target is explored on the map and, if the mod considers it hidden, why (terrain, forest, too flat, out of range).
 
+### Changed
+- Default `MinDistance` lowered from 80 to 0: the calibrated fog distances make the floor unnecessary, and it revealed more than you can see in thick fog. If the fog limits your view to 60 m, only 60 m are revealed now.
+
 ### Fixed
 - In new areas with a long horizon range, the map could take many seconds to update. Each update now reveals the normal view range for the whole cone first and the far band afterwards, and the map refreshes during long updates instead of only at the end.
 

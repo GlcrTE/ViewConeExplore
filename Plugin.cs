@@ -93,8 +93,8 @@ namespace ViewConeExplore
             // Measured: from a 100 m peak in snowfall, outlines faded at ~850 m, about half of what the fog density predicts.
             _snowVisibility = Config.Bind("Distance", "SnowVisibility", 0.55f,
                 new ConfigDescription("Scales all fog-based distances while it is snowing. Falling snow hides much more than the fog density suggests.", new AcceptableValueRange<float>(0.1f, 1f)));
-            _minDistance = Config.Bind("Distance", "MinDistance", 80f,
-                new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
+            _minDistance = Config.Bind("Distance", "MinDistance", 0f,
+                new ConfigDescription("Reveal distance never drops below this, even in thick fog or at night. 0 = follow the fog exactly.", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
                 "Derive the view distance from the current fog density (rain, mist, storms shorten it).");
             // 2.2 matches where land with trees is just barely visible through the fog (measured in DeepForest Mist).
