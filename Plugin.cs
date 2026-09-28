@@ -46,9 +46,10 @@ namespace ViewConeExplore
         private ConfigEntry<float> _horizonInlandMinAngle;
         private ConfigEntry<float> _horizonCoastDistance;
         private ConfigEntry<KeyboardShortcut> _calibrationKey;
-        private ConfigEntry<KeyboardShortcut> _horizonToggleKey;
-        private float _horizonConfirmUntil = -1f;
-        private const float HorizonConfirmSeconds = 3f;
+        private ConfigEntry<bool> _heightBonusEnabled;
+        private ConfigEntry<KeyboardShortcut> _heightBonusToggleKey;
+        private float _heightBonusConfirmUntil = -1f;
+        private const float ToggleConfirmSeconds = 3f;
 
         private Func<Minimap, int, int, bool> _explorePixel;
         private AccessTools.FieldRef<Minimap, Texture2D> _fogTexture;
@@ -82,6 +83,10 @@ namespace ViewConeExplore
             _enabled = Config.Bind("General", "Enabled", true, "Enable view-cone map exploration.");
             _maxDistance = Config.Bind("Distance", "MaxDistance", 0f,
                 new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance setting (224 m on Low up to 544 m on Extreme).", new AcceptableValueRange<float>(0f, 2000f)));
+            _heightBonusEnabled = Config.Bind("Distance", "HeightBonusEnabled", false,
+                "Height bonus: the higher your eye above the sea, the farther you can see. From hills and mountains this can reveal a lot at once, so it is off by default and switched in game with HeightBonusToggleKey.");
+            _heightBonusToggleKey = Config.Bind("Distance", "HeightBonusToggleKey", new KeyboardShortcut(KeyCode.F7),
+                "Switches the height bonus. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
             _heightBonusPerMeter = Config.Bind("Distance", "HeightBonusPerMeter", 1f,
                 new ConfigDescription("Percent added to the maximum view distances (normal and horizon) per meter your eye is above the sea. Fog still limits the view. 0 = no height bonus.", new AcceptableValueRange<float>(0f, 10f)));
             _heightBonusMax = Config.Bind("Distance", "HeightBonusMax", 100f,
@@ -120,10 +125,8 @@ namespace ViewConeExplore
                 new ConfigDescription("Radius in meters around you in which gaps are filled.", new AcceptableValueRange<float>(12f, 300f)));
             _fillMaxHoleSize = Config.Bind("GapFill", "MaxGapSize", 12,
                 new ConfigDescription("Largest gap that gets filled, in map pixels (1 pixel = 12 x 12 m).", new AcceptableValueRange<int>(1, 200)));
-            _horizonEnabled = Config.Bind("Horizon", "Enabled", false,
-                "Reveal distant coastlines and peaks that are just barely visible beyond the normal view distance. At sea and on the coast low shores count too, inland only tall peaks. Can be switched in game with ToggleKey.");
-            _horizonToggleKey = Config.Bind("Horizon", "ToggleKey", new KeyboardShortcut(KeyCode.F7),
-                "Switches horizon mode. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
+            _horizonEnabled = Config.Bind("Horizon", "Enabled", true,
+                "Reveal distant coastlines and peaks that are just barely visible beyond the normal view distance. At sea and on the coast low shores count too, inland only tall peaks.");
             _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1500f,
                 new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
             // Silhouettes against the sky stay visible through much more fog than terrain details.
@@ -167,8 +170,8 @@ namespace ViewConeExplore
 
             if (!IsTyping())
             {
-                if (_horizonToggleKey.Value.IsDown())
-                    ToggleHorizon(player);
+                if (_heightBonusToggleKey.Value.IsDown())
+                    ToggleHeightBonus(player);
                 if (_calibrationKey.Value.IsDown())
                     Calibrate(player);
             }
@@ -224,27 +227,27 @@ namespace ViewConeExplore
         }
 
         /// <summary>
-        /// Horizon mode reveals large areas at once, so switching it on needs a confirming second press.
+        /// The height bonus can reveal large areas at once, so switching it on needs a confirming second press.
         /// </summary>
-        private void ToggleHorizon(Player player)
+        private void ToggleHeightBonus(Player player)
         {
             string state;
-            if (_horizonEnabled.Value)
+            if (_heightBonusEnabled.Value)
             {
-                _horizonEnabled.Value = false;
-                state = "Horizon mode off";
+                _heightBonusEnabled.Value = false;
+                state = "Height bonus off";
             }
-            else if (Time.time <= _horizonConfirmUntil)
+            else if (Time.time <= _heightBonusConfirmUntil)
             {
-                _horizonEnabled.Value = true;
-                _horizonConfirmUntil = -1f;
-                state = "Horizon mode on";
+                _heightBonusEnabled.Value = true;
+                _heightBonusConfirmUntil = -1f;
+                state = "Height bonus on";
             }
             else
             {
-                _horizonConfirmUntil = Time.time + HorizonConfirmSeconds;
+                _heightBonusConfirmUntil = Time.time + ToggleConfirmSeconds;
                 player.Message(MessageHud.MessageType.TopLeft,
-                    $"Press {_horizonToggleKey.Value} again to turn on horizon mode (reveals distant coasts and peaks)");
+                    $"Press {_heightBonusToggleKey.Value} again to turn on the height bonus (see farther from high up)");
                 return;
             }
 
@@ -671,6 +674,8 @@ namespace ViewConeExplore
         /// </summary>
         private float GetHeightBonus(float eyeY, float waterLevel)
         {
+            if (!_heightBonusEnabled.Value)
+                return 1f;
             float height = Mathf.Max(0f, eyeY - waterLevel);
             return 1f + Mathf.Min(height * _heightBonusPerMeter.Value, _heightBonusMax.Value) / 100f;
         }
