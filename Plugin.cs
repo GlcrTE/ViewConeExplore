@@ -46,6 +46,9 @@ namespace ViewConeExplore
         private ConfigEntry<float> _horizonInlandMinAngle;
         private ConfigEntry<float> _horizonCoastDistance;
         private ConfigEntry<KeyboardShortcut> _calibrationKey;
+        private ConfigEntry<KeyboardShortcut> _horizonToggleKey;
+        private float _horizonConfirmUntil = -1f;
+        private const float HorizonConfirmSeconds = 3f;
 
         private Func<Minimap, int, int, bool> _explorePixel;
         private AccessTools.FieldRef<Minimap, Texture2D> _fogTexture;
@@ -117,8 +120,10 @@ namespace ViewConeExplore
                 new ConfigDescription("Radius in meters around you in which gaps are filled.", new AcceptableValueRange<float>(12f, 300f)));
             _fillMaxHoleSize = Config.Bind("GapFill", "MaxGapSize", 12,
                 new ConfigDescription("Largest gap that gets filled, in map pixels (1 pixel = 12 x 12 m).", new AcceptableValueRange<int>(1, 200)));
-            _horizonEnabled = Config.Bind("Horizon", "Enabled", true,
-                "Reveal distant coastlines and peaks that are just barely visible beyond the normal view distance. At sea and on the coast low shores count too, inland only tall peaks.");
+            _horizonEnabled = Config.Bind("Horizon", "Enabled", false,
+                "Reveal distant coastlines and peaks that are just barely visible beyond the normal view distance. At sea and on the coast low shores count too, inland only tall peaks. Can be switched in game with ToggleKey.");
+            _horizonToggleKey = Config.Bind("Horizon", "ToggleKey", new KeyboardShortcut(KeyCode.F7),
+                "Switches horizon mode. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
             _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1500f,
                 new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
             // Silhouettes against the sky stay visible through much more fog than terrain details.
@@ -160,8 +165,13 @@ namespace ViewConeExplore
 
             map.m_exploreRadius = _nearRadius.Value;
 
-            if (_calibrationKey.Value.IsDown())
-                Calibrate(player);
+            if (!IsTyping())
+            {
+                if (_horizonToggleKey.Value.IsDown())
+                    ToggleHorizon(player);
+                if (_calibrationKey.Value.IsDown())
+                    Calibrate(player);
+            }
 
             if (player.IsDead() || player.InInterior())
             {
@@ -211,6 +221,43 @@ namespace ViewConeExplore
             if (_sweep.Changed)
                 ApplyFog(_sweep);
             _sweep = null;
+        }
+
+        /// <summary>
+        /// Horizon mode reveals large areas at once, so switching it on needs a confirming second press.
+        /// </summary>
+        private void ToggleHorizon(Player player)
+        {
+            string state;
+            if (_horizonEnabled.Value)
+            {
+                _horizonEnabled.Value = false;
+                state = "Horizon mode off";
+            }
+            else if (Time.time <= _horizonConfirmUntil)
+            {
+                _horizonEnabled.Value = true;
+                _horizonConfirmUntil = -1f;
+                state = "Horizon mode on";
+            }
+            else
+            {
+                _horizonConfirmUntil = Time.time + HorizonConfirmSeconds;
+                player.Message(MessageHud.MessageType.TopLeft,
+                    $"Press {_horizonToggleKey.Value} again to turn on horizon mode (reveals distant coasts and peaks)");
+                return;
+            }
+
+            player.Message(MessageHud.MessageType.TopLeft, state);
+            // Start a fresh update with the new setting right away.
+            _sweep = null;
+            _timer = _interval.Value;
+        }
+
+        private static bool IsTyping()
+        {
+            return (Chat.instance != null && Chat.instance.HasFocus()) || global::Console.IsVisible()
+                   || TextInput.IsVisible() || Minimap.InTextInput() || Menu.IsVisible();
         }
 
         private void ApplyFog(Sweep s)

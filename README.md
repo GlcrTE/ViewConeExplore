@@ -8,7 +8,7 @@ A Valheim BepInEx mod that reveals the minimap only where you look. Vanilla unco
 - **Dynamic view distance:** Fog, rain and storms shorten your range, and night reduces it.
 - **Line of sight:** Hills and mountains hide what's behind them, while distant peaks stay visible.
 - **Forests block your view:** Dense forest limits sight at ground level, but you can look over it from above. No physics, so it works at any distance.
-- **Horizon mode:** Distant coastlines and peaks that you can just barely see are revealed far beyond the normal view distance. At sea and on the coast even low shores count; inland only tall peaks rising above you against the sky. Water and flat land stay hidden, and taller land shows up from farther away.
+- **Horizon mode (optional, F7):** Distant coastlines and peaks that you can just barely see are revealed far beyond the normal view distance. At sea and on the coast even low shores count; inland only tall peaks rising above you against the sky. Water and flat land stay hidden, and taller land shows up from farther away.
 - **Height bonus:** The higher you stand above the sea, on a hill, a cliff or a mast, the farther you can see. Fog still limits the view.
 - **Gap filling:** Small unexplored spots near you are filled in automatically, so the map doesn't turn into a patchwork.
 - **Near radius:** Your immediate surroundings stay revealed all around you.
@@ -40,7 +40,8 @@ The mod is client-side only and does not need to be installed on the server.
 | Forest | `ForestSightDistance` | `50` | Meters you can see through dense forest |
 | Forest | `CanopyHeight` | `20` | Tree height in meters |
 | Forest | `DensityMultiplier` | `1.0` | Scales forest density (0 = no forests) |
-| Horizon | `Enabled` | `true` | Reveal distant coasts and peaks beyond the normal view distance |
+| Horizon | `Enabled` | `false` | Reveal distant coasts and peaks beyond the normal view distance (switch in game with `ToggleKey`) |
+| Horizon | `ToggleKey` | `F7` | Switches horizon mode; turning it on needs a second press within 3 seconds |
 | Horizon | `MaxDistance` | `1500` | Maximum distance for coasts and peaks (clear weather, daytime) |
 | Horizon | `FogMultiplier` | `3.5` | Scales the fog-derived distance for coasts and peaks |
 | Horizon | `MinAngle` | `0.25` | At sea or on the coast: how far land must rise above the sea to be noticed, in degrees (0.25 ≈ 4.4 m at 1000 m) |
