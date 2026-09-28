@@ -61,7 +61,7 @@ namespace ViewConeExplore
 
         // World heights and forests are procedural and never change, so caching them is safe.
         private readonly Dictionary<long, Cell> _cellCache = new Dictionary<long, Cell>();
-        private const int MaxCacheEntries = 250000;
+        private const int MaxCacheEntries = 400000;
         // Same threshold the game uses for WorldGenerator.InForest().
         private const float ForestThreshold = 1.15f;
         private float _timer;
@@ -105,13 +105,13 @@ namespace ViewConeExplore
                 new ConfigDescription("Largest gap that gets filled, in map pixels (1 pixel = 12 x 12 m).", new AcceptableValueRange<int>(1, 200)));
             _horizonEnabled = Config.Bind("Horizon", "Enabled", true,
                 "At sea or on the coast, reveal distant coastlines and peaks that are just barely visible beyond the normal view distance.");
-            _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1200f,
+            _horizonMaxDistance = Config.Bind("Horizon", "MaxDistance", 1500f,
                 new ConfigDescription("Maximum distance in meters at which coasts and peaks are revealed (clear weather, daytime).", new AcceptableValueRange<float>(100f, 3000f)));
             // Silhouettes against the sky stay visible through much more fog than terrain details.
             _horizonFogMultiplier = Config.Bind("Horizon", "FogMultiplier", 3f,
                 new ConfigDescription("Scales the fog-derived distance for coasts and peaks.", new AcceptableValueRange<float>(0.1f, 10f)));
-            _horizonMinAngle = Config.Bind("Horizon", "MinAngle", 0.3f,
-                new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.3 means about 5 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
+            _horizonMinAngle = Config.Bind("Horizon", "MinAngle", 0.25f,
+                new ConfigDescription("How far land must rise above the sea, as seen from you, to be noticed (degrees). 0.25 means about 4.4 m at 1000 m distance; higher values reveal only taller coasts and peaks.", new AcceptableValueRange<float>(0.01f, 5f)));
             _horizonCoastDistance = Config.Bind("Horizon", "CoastDistance", 60f,
                 new ConfigDescription("Horizon mode is active while you are at sea or open ocean is within this many meters.", new AcceptableValueRange<float>(0f, 300f)));
             _calibrationKey = Config.Bind("Debug", "CalibrationKey", new KeyboardShortcut(KeyCode.F8),

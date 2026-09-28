@@ -38,9 +38,9 @@ The mod is client-side only and does not need to be installed on the server.
 | Forest | `CanopyHeight` | `20` | Tree height in meters |
 | Forest | `DensityMultiplier` | `1.0` | Scales forest density (0 = no forests) |
 | Horizon | `Enabled` | `true` | Reveal distant coasts and peaks at sea or on the coast |
-| Horizon | `MaxDistance` | `1200` | Maximum distance for coasts and peaks (clear weather, daytime) |
+| Horizon | `MaxDistance` | `1500` | Maximum distance for coasts and peaks (clear weather, daytime) |
 | Horizon | `FogMultiplier` | `3.0` | Scales the fog-derived distance for coasts and peaks |
-| Horizon | `MinAngle` | `0.3` | How far land must rise above the sea to be noticed, in degrees (0.3 ≈ 5 m at 1000 m) |
+| Horizon | `MinAngle` | `0.25` | How far land must rise above the sea to be noticed, in degrees (0.25 ≈ 4.4 m at 1000 m) |
 | Horizon | `CoastDistance` | `60` | Horizon mode is active while open ocean is within this many meters |
 | GapFill | `FillSmallGaps` | `true` | Fill small enclosed gaps near you |
 | GapFill | `Radius` | `100` | Radius in meters for gap filling |
