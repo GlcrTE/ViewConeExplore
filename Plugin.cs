@@ -17,7 +17,7 @@ namespace ViewConeExplore
     {
         public const string Guid = "valheim.viewconeexplore";
         public const string ModName = "View Cone Explore";
-        public const string Version = "1.0.0";
+        public const string Version = "1.0.1";
 
         private ConfigEntry<bool> _enabled;
         private ConfigEntry<float> _maxDistance;
@@ -64,11 +64,12 @@ namespace ViewConeExplore
             _enabled = Config.Bind("General", "Enabled", true, "Enable view-cone map exploration.");
             _maxDistance = Config.Bind("Distance", "MaxDistance", 400f,
                 new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime).", new AcceptableValueRange<float>(50f, 2000f)));
-            _minDistance = Config.Bind("Distance", "MinDistance", 40f,
+            _minDistance = Config.Bind("Distance", "MinDistance", 80f,
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
                 "Derive the view distance from the current fog density (rain, mist, storms shorten it).");
-            _fogMultiplier = Config.Bind("Distance", "FogMultiplier", 1f,
+            // 1.8 roughly matches where silhouettes (coasts, rocks) still show through the fog.
+            _fogMultiplier = Config.Bind("Distance", "FogMultiplier", 1.8f,
                 new ConfigDescription("Scales the fog-derived view distance.", new AcceptableValueRange<float>(0.1f, 5f)));
             _nightMultiplier = Config.Bind("Distance", "NightMultiplier", 0.5f,
                 new ConfigDescription("View distance multiplier at night (1 = no change).", new AcceptableValueRange<float>(0f, 1f)));

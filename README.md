@@ -26,9 +26,9 @@ The mod is client-side only and does not need to be installed on the server.
 |---|---|---|---|
 | General | `Enabled` | `true` | Enable view-cone map exploration |
 | Distance | `MaxDistance` | `400` | Maximum reveal distance in meters (clear weather, daytime) |
-| Distance | `MinDistance` | `40` | The reveal distance never drops below this |
+| Distance | `MinDistance` | `80` | The reveal distance never drops below this |
 | Distance | `UseFogVisibility` | `true` | Derive the view distance from the current fog density |
-| Distance | `FogMultiplier` | `1.0` | Scales the fog-derived view distance |
+| Distance | `FogMultiplier` | `1.8` | Scales the fog-derived view distance |
 | Distance | `NightMultiplier` | `0.5` | View distance multiplier at night |
 | Cone | `FieldOfView` | `0` | Horizontal cone angle in degrees (0 = camera FOV) |
 | Cone | `LineOfSight` | `true` | Terrain blocks the view |
