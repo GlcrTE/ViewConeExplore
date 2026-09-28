@@ -73,8 +73,8 @@ namespace ViewConeExplore
         private void Awake()
         {
             _enabled = Config.Bind("General", "Enabled", true, "Enable view-cone map exploration.");
-            _maxDistance = Config.Bind("Distance", "MaxDistance", 400f,
-                new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime).", new AcceptableValueRange<float>(50f, 2000f)));
+            _maxDistance = Config.Bind("Distance", "MaxDistance", 0f,
+                new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance setting (224 m on Low up to 544 m on Extreme).", new AcceptableValueRange<float>(0f, 2000f)));
             _minDistance = Config.Bind("Distance", "MinDistance", 80f,
                 new ConfigDescription("Reveal distance never drops below this (thick fog, night).", new AcceptableValueRange<float>(0f, 500f)));
             _useFog = Config.Bind("Distance", "UseFogVisibility", true,
@@ -206,7 +206,7 @@ namespace ViewConeExplore
 
         private Sweep StartSweep(Minimap map, Player player, Camera cam)
         {
-            float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
+            float range = GetViewDistance(GetMaxDistance(), _minDistance.Value, _fogMultiplier.Value);
             // Horizon mode: beyond the normal range, only land that stands out against the sky is revealed.
             bool coastal = IsNearOcean(player.transform.position);
             float horizonRange = _horizonEnabled.Value && (coastal || _horizonInlandMinAngle.Value > 0f)
@@ -496,7 +496,7 @@ namespace ViewConeExplore
             float fogRange = GetFogRange();
             float daylight = GetDaylight();
             float nightFactor = Mathf.Lerp(_nightMultiplier.Value, 1f, daylight);
-            float range = GetViewDistance(_maxDistance.Value, _minDistance.Value, _fogMultiplier.Value);
+            float range = GetViewDistance(GetMaxDistance(), _minDistance.Value, _fogMultiplier.Value);
             bool nearOcean = IsNearOcean(player.transform.position);
             float horizonRange = GetViewDistance(_horizonMaxDistance.Value, 0f, _horizonFogMultiplier.Value);
             string env = EnvMan.instance?.GetCurrentEnvironment()?.m_name ?? "?";
@@ -530,10 +530,24 @@ namespace ViewConeExplore
                 ? $"fog={RenderSettings.fogMode} density={RenderSettings.fogDensity:0.00000} fogRange={fogRange:0}"
                 : "fog=off";
             Logger.LogInfo($"[Calibrate] {target} | {fog} env={env} daylight={daylight:0.00} " +
-                           $"viewRange={range:0} coastal={nearOcean} horizonRange={horizonRange:0} " +
+                           $"viewRange={range:0} maxDistance={GetMaxDistance():0} coastal={nearOcean} horizonRange={horizonRange:0} " +
                            $"eyeHeight={eye.y - waterLevel:0.0} pos=({pos.x:0},{pos.z:0})");
             player.Message(MessageHud.MessageType.TopLeft,
                 $"{summary}\nView {range:0} m, horizon {horizonRange:0} m ({(nearOcean ? "coast" : "inland")}), fog {(float.IsInfinity(fogRange) ? "off" : fogRange.ToString("0") + " m")}");
+        }
+
+        /// <summary>
+        /// MaxDistance, or with 0 the game's simulation distance in meters as the graphics menu shows it.
+        /// </summary>
+        private float GetMaxDistance()
+        {
+            if (_maxDistance.Value > 0f)
+                return _maxDistance.Value;
+            if (ZNet.instance == null)
+                return 288f;
+            // Same formula as the graphics menu: zones around the player's zone, 32 m per half zone.
+            int total = ZNet.instance.GetSyncedSimulationDistance().TotalSimulationDistance;
+            return (2 * total + 1) * 32f;
         }
 
         /// <summary>

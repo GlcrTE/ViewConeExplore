@@ -26,7 +26,7 @@ The mod is client-side only and does not need to be installed on the server.
 | Section | Setting | Default | Description |
 |---|---|---|---|
 | General | `Enabled` | `true` | Enable view-cone map exploration |
-| Distance | `MaxDistance` | `400` | Maximum reveal distance in meters (clear weather, daytime) |
+| Distance | `MaxDistance` | `0` | Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance (Low 224 m, Medium/Classic 288 m, High 352 m, Very High 416 m, Ultra 480 m, Extreme 544 m) |
 | Distance | `MinDistance` | `80` | The reveal distance never drops below this |
 | Distance | `UseFogVisibility` | `true` | Derive the view distance from the current fog density |
 | Distance | `FogMultiplier` | `2.2` | Scales the fog-derived view distance |
