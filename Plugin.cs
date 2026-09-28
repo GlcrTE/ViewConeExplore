@@ -70,6 +70,8 @@ namespace ViewConeExplore
         private const float ForestThreshold = 1.15f;
         private float _timer;
         private Sweep _sweep;
+        private float _lastApply;
+        private const float ProgressApplyInterval = 0.5f;
         private readonly System.Diagnostics.Stopwatch _budgetTimer = new System.Diagnostics.Stopwatch();
 
         private void Awake()
@@ -182,20 +184,40 @@ namespace ViewConeExplore
             }
 
             // Spread the rays over several frames so a long view distance never stalls a single frame.
+            // All rays first cover the normal range, then the far band, so nearby terrain shows up quickly.
             _budgetTimer.Restart();
             float budgetMs = _frameBudget.Value;
-            while (_sweep.NextRay < _sweep.RayCount)
+            while (true)
             {
+                if (_sweep.NextRay >= _sweep.RayCount)
+                {
+                    if (_sweep.FarPass || _sweep.FarRange <= _sweep.Range)
+                        break;
+                    _sweep.FarPass = true;
+                    _sweep.NextRay = 0;
+                }
                 TraceRay(_sweep, _sweep.NextRay++);
                 if (_budgetTimer.Elapsed.TotalMilliseconds >= budgetMs)
+                {
+                    // Long sweeps show their progress on the map instead of only at the end.
+                    if (_sweep.Changed && Time.time - _lastApply >= ProgressApplyInterval)
+                        ApplyFog(_sweep);
                     return;
+                }
             }
 
             if (_fillEnabled.Value && _explored != null && FillSmallGaps(map, player.transform.position))
                 _sweep.Changed = true;
             if (_sweep.Changed)
-                _fogTexture(map).Apply();
+                ApplyFog(_sweep);
             _sweep = null;
+        }
+
+        private void ApplyFog(Sweep s)
+        {
+            _fogTexture(s.Map).Apply();
+            s.Changed = false;
+            _lastApply = Time.time;
         }
 
         /// <summary>One pass over the view cone, captured when it starts and traced over several frames.</summary>
@@ -206,7 +228,7 @@ namespace ViewConeExplore
             public float BaseYaw, FovRad, Range, FarRange, Step, FarStep, WaterLevel;
             public int RayCount, NextRay, TextureSize, Half;
             public float PixelSize;
-            public bool LineOfSight, Forest, Horizon, Changed;
+            public bool LineOfSight, Forest, Horizon, Changed, FarPass;
             public float ForestSight, Canopy, RiseBase, MinRiseSlope;
         }
 
@@ -277,18 +299,19 @@ namespace ViewConeExplore
         private void TraceRay(Sweep s, int r)
         {
             float t = s.RayCount == 1 ? 0.5f : (float)r / (s.RayCount - 1);
-            TraceYaw(s, s.BaseYaw - s.FovRad * 0.5f + s.FovRad * t, -1f);
+            // The far pass walks the near part again to rebuild line of sight; those cells are cached.
+            TraceYaw(s, s.BaseYaw - s.FovRad * 0.5f + s.FovRad * t, -1f, s.FarPass ? s.FarRange : s.Range);
         }
 
         /// <summary>
         /// Walks one ray and explores every visible map pixel on it. With probeDist >= 0 nothing is
         /// explored; instead the verdict for the point at that distance is returned (calibration).
         /// </summary>
-        private string TraceYaw(Sweep s, float yaw, float probeDist)
+        private string TraceYaw(Sweep s, float yaw, float probeDist, float maxDist)
         {
             bool probe = probeDist >= 0f;
-            if (probe && probeDist > s.FarRange)
-                return $"beyond range ({s.FarRange:0} m)";
+            if (probe && probeDist > maxDist)
+                return $"beyond range ({maxDist:0} m)";
 
             float dx = Mathf.Sin(yaw);
             float dz = Mathf.Cos(yaw);
@@ -300,7 +323,7 @@ namespace ViewConeExplore
             // Once the forest is too thick, only points rising above the canopy line stay visible.
             float canopySlope = float.NegativeInfinity;
 
-            for (float d = s.Step; d <= s.FarRange; d += d > s.Range ? s.FarStep : s.Step)
+            for (float d = s.Step; d <= maxDist; d += d > s.Range ? s.FarStep : s.Step)
             {
                 float x = eye.x + dx * d;
                 float z = eye.z + dz * d;
@@ -572,7 +595,7 @@ namespace ViewConeExplore
                 Sweep probe = map != null ? StartSweep(map, player, cam) : null;
                 if (probe != null)
                 {
-                    verdict = TraceYaw(probe, Mathf.Atan2(hit.x - eye.x, hit.z - eye.z), dist);
+                    verdict = TraceYaw(probe, Mathf.Atan2(hit.x - eye.x, hit.z - eye.z), dist, probe.FarRange);
                     BitArray bits = _explored?.Invoke(map);
                     int px = Mathf.RoundToInt(hit.x / probe.PixelSize + probe.Half);
                     int py = Mathf.RoundToInt(hit.z / probe.PixelSize + probe.Half);
