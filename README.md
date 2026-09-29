@@ -28,8 +28,7 @@ The mod is client-side only and does not need to be installed on the server.
 |---|---|---|---|
 | General | `Enabled` | `true` | Enable view-cone map exploration |
 | Distance | `MaxDistance` | `0` | Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance (Low 224 m, Medium/Classic 288 m, High 352 m, Very High 416 m, Ultra 480 m, Extreme 544 m) |
-| Distance | `HeightBonusEnabled` | `true` | Height bonus on or off (switch in game with `HeightBonusToggleKey`) |
-| Distance | `HeightBonusToggleKey` | `F7` | Switches the height bonus; turning it on needs a second press within 3 seconds |
+| Distance | `HeightBonusEnabled` | `true` | Height bonus on or off |
 | Distance | `HeightBonusMaxFactor` | `8` | The height bonus reaches at most this many times the draw distance |
 | Distance | `SnowVisibility` | `0.55` | Scales all fog-based distances while it is snowing |
 | Distance | `MinDistance` | `0` | The reveal distance never drops below this (0 = follow the fog exactly) |

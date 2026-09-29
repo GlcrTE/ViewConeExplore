@@ -48,9 +48,6 @@ namespace ViewConeExplore
         private ConfigEntry<float> _horizonCoastDistance;
         private ConfigEntry<KeyboardShortcut> _calibrationKey;
         private ConfigEntry<bool> _heightBonusEnabled;
-        private ConfigEntry<KeyboardShortcut> _heightBonusToggleKey;
-        private float _heightBonusConfirmUntil = -1f;
-        private const float ToggleConfirmSeconds = 3f;
 
         private Func<Minimap, int, int, bool> _explorePixel;
         private AccessTools.FieldRef<Minimap, Texture2D> _fogTexture;
@@ -85,9 +82,7 @@ namespace ViewConeExplore
             _maxDistance = Config.Bind("Distance", "MaxDistance", 0f,
                 new ConfigDescription("Maximum reveal distance in meters (clear weather, daytime). 0 = follow the game's simulation distance setting (224 m on Low up to 544 m on Extreme).", new AcceptableValueRange<float>(0f, 2000f)));
             _heightBonusEnabled = Config.Bind("Distance", "HeightBonusEnabled", true,
-                "Height bonus: ground you look down on from above stays recognizable farther away. Its reach grows with the square root of how far your eye is above it, e.g. 3x the draw distance 16 m above, 7x 90 m above. Fog still limits it. Can be switched in game with HeightBonusToggleKey.");
-            _heightBonusToggleKey = Config.Bind("Distance", "HeightBonusToggleKey", new KeyboardShortcut(KeyCode.F7),
-                "Switches the height bonus. Turning it on needs a second press within 3 seconds to confirm, turning it off takes effect at once.");
+                "Height bonus: ground you look down on from above stays recognizable farther away. Its reach grows with the square root of how far your eye is above it, e.g. 3x the draw distance 16 m above, 7x 90 m above. Fog still limits it.");
             _heightBonusMaxFactor = Config.Bind("Distance", "HeightBonusMaxFactor", 8f,
                 new ConfigDescription("The height bonus reaches at most this many times the draw distance.", new AcceptableValueRange<float>(1f, 20f)));
             // Measured: from a 100 m peak in snowfall, outlines faded at ~850 m, about half of what the fog density predicts.
@@ -170,13 +165,8 @@ namespace ViewConeExplore
 
             map.m_exploreRadius = _nearRadius.Value;
 
-            if (!IsTyping())
-            {
-                if (_heightBonusToggleKey.Value.IsDown())
-                    ToggleHeightBonus(player);
-                if (_calibrationKey.Value.IsDown())
-                    Calibrate(player);
-            }
+            if (!IsTyping() && _calibrationKey.Value.IsDown())
+                Calibrate(player);
 
             if (player.IsDead() || player.InInterior())
             {
@@ -226,37 +216,6 @@ namespace ViewConeExplore
             if (_sweep.Changed)
                 ApplyFog(_sweep);
             _sweep = null;
-        }
-
-        /// <summary>
-        /// The height bonus can reveal large areas at once, so switching it on needs a confirming second press.
-        /// </summary>
-        private void ToggleHeightBonus(Player player)
-        {
-            string state;
-            if (_heightBonusEnabled.Value)
-            {
-                _heightBonusEnabled.Value = false;
-                state = "Height bonus off";
-            }
-            else if (Time.time <= _heightBonusConfirmUntil)
-            {
-                _heightBonusEnabled.Value = true;
-                _heightBonusConfirmUntil = -1f;
-                state = "Height bonus on";
-            }
-            else
-            {
-                _heightBonusConfirmUntil = Time.time + ToggleConfirmSeconds;
-                player.Message(MessageHud.MessageType.TopLeft,
-                    $"Press {_heightBonusToggleKey.Value} again to turn on the height bonus (see farther from high up)");
-                return;
-            }
-
-            player.Message(MessageHud.MessageType.TopLeft, state);
-            // Start a fresh update with the new setting right away.
-            _sweep = null;
-            _timer = _interval.Value;
         }
 
         private static bool IsTyping()
