@@ -15,7 +15,7 @@
     <Company>View Cone Explore</Company>
     <Product>View Cone Explore</Product>
     <Version>1.2.0</Version>
-    <GameDir>$(MSBuildThisFileDirectory)..\..\..\</GameDir>
+    <GameDir Condition="'$(GameDir)' == ''">D:\Games\SteamLibrary\steamapps\common\Valheim\</GameDir>
     <Managed>$(GameDir)valheim_Data\Managed\</Managed>
     <BepInExCore>$(GameDir)BepInEx\core\</BepInExCore>
   </PropertyGroup>
